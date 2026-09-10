@@ -40,3 +40,27 @@ func TestHDHomeRunDiscoversFreshAuthAndReadsGzip(t *testing.T) {
 		t.Fatalf("unexpected request order: %#v", paths)
 	}
 }
+
+func TestFetchErrorRedactsAuthorizationQuery(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if got := r.Header.Get("User-Agent"); !strings.HasPrefix(got, "CatchUpDVR/") {
+			t.Fatalf("unexpected user agent %q", got)
+		}
+		return &http.Response{
+			StatusCode: http.StatusForbidden,
+			Status:     "403 Forbidden",
+			Body:       io.NopCloser(strings.NewReader("forbidden")),
+			Header:     make(http.Header),
+		}, nil
+	})}
+	_, err := (Fetcher{Client: client}).fetch(context.Background(), "https://api.hdhomerun.com/api/xmltv?DeviceAuth=do-not-log-this")
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if strings.Contains(err.Error(), "do-not-log-this") || strings.Contains(err.Error(), "DeviceAuth") {
+		t.Fatalf("authorization query leaked in error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "403 Forbidden") {
+		t.Fatalf("status missing from error: %v", err)
+	}
+}

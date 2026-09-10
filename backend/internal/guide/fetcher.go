@@ -75,13 +75,14 @@ func (f Fetcher) fetch(ctx context.Context, location string) ([]byte, error) {
 		return nil, err
 	}
 	req.Header.Set("Accept-Encoding", "gzip")
+	req.Header.Set("User-Agent", "CatchUpDVR/0.1 (+https://github.com/Hewbacca/CatchupDVR)")
 	response, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("%s returned %s", location, response.Status)
+		return nil, fmt.Errorf("%s returned %s", redactedLocation(location), response.Status)
 	}
 	var body io.Reader = response.Body
 	if strings.EqualFold(response.Header.Get("Content-Encoding"), "gzip") {
@@ -93,6 +94,16 @@ func (f Fetcher) fetch(ctx context.Context, location string) ([]byte, error) {
 		body = compressed
 	}
 	return io.ReadAll(io.LimitReader(body, 128<<20))
+}
+
+func redactedLocation(location string) string {
+	parsed, err := url.Parse(location)
+	if err != nil {
+		return "remote guide service"
+	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String()
 }
 
 func (f Fetcher) saveCache(data []byte) error {
