@@ -2,7 +2,7 @@
 set -euo pipefail
 
 DEFAULT_IMAGE="ghcr.io/hewbacca/catchupdvr:edge"
-DEFAULT_PORT="8080"
+DEFAULT_PORT="8095"
 
 say() { printf '%s\n' "$*"; }
 fail() { say "Error: $*" >&2; exit 1; }
@@ -47,7 +47,7 @@ services:
     restart: unless-stopped
     network_mode: host
     environment:
-      HTTP_ADDR: :${CATCHUP_PORT:-8080}
+      HTTP_ADDR: :${CATCHUP_PORT:-8095}
       DATABASE_PATH: /data/catchup.db
       RECORDINGS_DIR: /recordings
       HDHOMERUN_IP: ${HDHOMERUN_IP}
@@ -66,7 +66,7 @@ services:
       - ${CATCHUP_DATA_DIR}:/data:Z
       - ${CATCHUP_RECORDINGS_DIR}:/recordings:Z
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:${CATCHUP_PORT:-8080}/api/health"]
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:${CATCHUP_PORT:-8095}/api/health"]
       interval: 30s
       timeout: 5s
       retries: 3
