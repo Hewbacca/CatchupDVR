@@ -1,0 +1,9 @@
+.DS_Store
+.env
+data/
+recordings/
+catchup-dvr/
+backend/catchupd
+backend/coverage.out
+web/node_modules/
+web/dist/

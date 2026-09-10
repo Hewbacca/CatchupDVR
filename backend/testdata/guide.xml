@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="7.1"><display-name>7.1</display-name><display-name>KMGH</display-name></channel>
+  <channel id="9.1"><display-name>9.1</display-name><display-name>KUSA</display-name></channel>
+  <channel id="20.1"><display-name>20.1</display-name><display-name>KTVD</display-name></channel>
+  <programme start="20260910090000 -0600" stop="20260910110000 -0600" channel="7.1"><title>College Football</title><sub-title>Colorado vs. State</sub-title><desc>Live from Denver.</desc><category>Sports</category></programme>
+  <programme start="20260910110000 -0600" stop="20260910113000 -0600" channel="7.1"><title>Local News</title><category>News</category></programme>
+  <programme start="20260910090000 -0600" stop="20260910100000 -0600" channel="9.1"><title>Evening News</title><category>News</category></programme>
+  <programme start="20260910100000 -0600" stop="20260910120000 -0600" channel="9.1"><title>Baseball</title><sub-title>Rockies at Dodgers</sub-title><category>Sports</category></programme>
+  <programme start="20260910093000 -0600" stop="20260910113000 -0600" channel="20.1"><title>Classic Movie</title><category>Movie</category></programme>
+</tv>

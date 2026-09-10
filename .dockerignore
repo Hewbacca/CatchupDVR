@@ -1,0 +1,9 @@
+.git
+.env
+data
+recordings
+backend/catchupd
+backend/coverage.out
+web/node_modules
+web/dist
+
