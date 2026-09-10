@@ -60,8 +60,6 @@ services:
       POST_PADDING_MINUTES: ${POST_PADDING_MINUTES:-5}
     devices:
       - /dev/dri:/dev/dri
-    group_add:
-      - keep-groups
     volumes:
       - ${CATCHUP_DATA_DIR}:/data:Z
       - ${CATCHUP_RECORDINGS_DIR}:/recordings:Z

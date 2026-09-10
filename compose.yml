@@ -11,8 +11,6 @@ services:
       RECORDINGS_DIR: /recordings
     devices:
       - /dev/dri:/dev/dri
-    group_add:
-      - keep-groups
     volumes:
       - ./data:/data:Z
       - ./recordings:/recordings:Z
