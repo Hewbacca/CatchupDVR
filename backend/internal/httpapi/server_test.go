@@ -19,13 +19,18 @@ import (
 	storage "github.com/Hewbacca/CatchupDVR/backend/internal/store"
 )
 
-type testStore struct{ credentials *model.AuthCredentials }
+type testStore struct {
+	credentials  *model.AuthCredentials
+	tunerAddress string
+}
 
 func (*testStore) Guide(context.Context, time.Time, time.Time) (model.Guide, error) {
 	return model.Guide{}, nil
 }
 func (*testStore) GuideDays(context.Context) ([]string, error) { return []string{"2026-09-10"}, nil }
-func (*testStore) SearchGuide(context.Context, string) ([]model.Program, error) { return []model.Program{}, nil }
+func (*testStore) SearchGuide(context.Context, string) ([]model.Program, error) {
+	return []model.Program{}, nil
+}
 func (*testStore) Schedule(context.Context, string, int, int, int) (model.Recording, error) {
 	return model.Recording{}, nil
 }
@@ -45,11 +50,18 @@ func (s *testStore) CreateAuthCredentials(_ context.Context, credentials model.A
 	return nil
 }
 func (s *testStore) UpdateAuthCredentials(_ context.Context, credentials model.AuthCredentials) error {
-	if s.credentials == nil { return errors.New("account has not been configured") }
+	if s.credentials == nil {
+		return errors.New("account has not been configured")
+	}
 	s.credentials = &credentials
 	return nil
 }
-func (*testStore) FavoriteChannels(context.Context, string) ([]string, error) { return []string{}, nil }
+func (s *testStore) HDHomeRunAddress(context.Context) (string, error) { return s.tunerAddress, nil }
+func (s *testStore) SetHDHomeRunAddress(_ context.Context, address string) error {
+	s.tunerAddress = address
+	return nil
+}
+func (*testStore) FavoriteChannels(context.Context, string) ([]string, error)     { return []string{}, nil }
 func (*testStore) SetFavoriteChannel(context.Context, string, string, bool) error { return nil }
 
 type testRecorder struct{}
@@ -77,7 +89,7 @@ func (l *testLive) Stop(_ context.Context, id string) error {
 func testHandler(t *testing.T, live LiveController, tuners TunerCounter) http.Handler {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return New(config.Config{RecordingsDir: t.TempDir(), TunerCount: 2}, &testStore{}, guide.RefreshService{}, testRecorder{}, live, tuners, logger)
+	return New(config.Config{RecordingsDir: t.TempDir(), TunerCount: 2}, config.NewTunerAddress(""), &testStore{}, guide.RefreshService{}, testRecorder{}, live, tuners, logger)
 }
 
 func setupCookie(t *testing.T, handler http.Handler) *http.Cookie {

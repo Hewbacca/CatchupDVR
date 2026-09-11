@@ -16,7 +16,7 @@ func TestLiveSessionCreatesAndRemovesTemporaryBuffer(t *testing.T) {
 	root := t.TempDir()
 	pool := NewTunerPool(2)
 	manager := NewLiveManager(context.Background(), LiveConfig{
-		HDHomeRunIP: "192.168.0.103", RecordingsDir: root, Pool: pool,
+		HDHomeRunAddress: func() string { return "192.168.0.103" }, RecordingsDir: root, Pool: pool,
 		Profile: Profile{Mode: "software"}, ReadyTimeout: time.Second,
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	manager.newProcess = func(command Command, _ io.Writer) process {

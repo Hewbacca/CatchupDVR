@@ -29,12 +29,12 @@ type Repository interface {
 }
 
 type SupervisorConfig struct {
-	HDHomeRunIP   string
-	RecordingsDir string
-	Profile       Profile
-	Pool          *TunerPool
-	PollInterval  time.Duration
-	Heartbeat     time.Duration
+	HDHomeRunAddress func() string
+	RecordingsDir    string
+	Profile          Profile
+	Pool             *TunerPool
+	PollInterval     time.Duration
+	Heartbeat        time.Duration
 }
 
 type process interface {
@@ -72,6 +72,9 @@ type activeJob struct {
 var ErrRecordingDeleted = errors.New("recording deleted by user")
 
 func NewSupervisor(repository Repository, config SupervisorConfig, logger *slog.Logger) *Supervisor {
+	if config.HDHomeRunAddress == nil {
+		config.HDHomeRunAddress = func() string { return "" }
+	}
 	if config.PollInterval <= 0 {
 		config.PollInterval = time.Second
 	}
@@ -211,7 +214,7 @@ func (s *Supervisor) capture(ctx context.Context, recording model.Recording) {
 		return
 	}
 	defer s.config.Pool.Release(reservationKey)
-	inputURL, err := HDHomeRunStreamURL(s.config.HDHomeRunIP, recording.ChannelNumber)
+	inputURL, err := HDHomeRunStreamURL(s.config.HDHomeRunAddress(), recording.ChannelNumber)
 	if err != nil {
 		s.finish(recording.ID, "failed", err.Error())
 		return

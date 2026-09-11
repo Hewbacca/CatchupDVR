@@ -48,6 +48,23 @@ func Open(path string) (*Store, error) {
 
 func (s *Store) Close() error { return s.db.Close() }
 
+// HDHomeRunAddress is stored in the database instead of process environment so
+// first-run setup survives container recreation and can take effect at runtime.
+func (s *Store) HDHomeRunAddress(ctx context.Context) (string, error) {
+	var address string
+	err := s.db.QueryRowContext(ctx, "SELECT value FROM metadata WHERE key='hdhomerun_address'").Scan(&address)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return strings.TrimSpace(address), err
+}
+
+func (s *Store) SetHDHomeRunAddress(ctx context.Context, address string) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO metadata(key, value) VALUES('hdhomerun_address', ?)
+ON CONFLICT(key) DO UPDATE SET value=excluded.value`, strings.TrimSpace(address))
+	return err
+}
+
 func (s *Store) migrate(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `
 PRAGMA foreign_keys = ON;

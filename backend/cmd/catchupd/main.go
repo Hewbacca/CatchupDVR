@@ -28,18 +28,25 @@ func main() {
 		os.Exit(1)
 	}
 	defer database.Close()
+	tunerAddress, err := database.HDHomeRunAddress(ctx)
+	if err != nil {
+		logger.Error("read tuner address", "error", err)
+		os.Exit(1)
+	}
+	tuner := config.NewTunerAddress(tunerAddress)
 	refresh := guide.RefreshService{
 		Fetcher: guide.Fetcher{CachePath: filepath.Join(filepath.Dir(cfg.DatabasePath), "guide-last-good.xml")},
 		Store:   database,
 	}
-	guideSource, guideLocation := "hdhomerun", cfg.HDHomeRunIP
-	if guideLocation == "" && cfg.XMLTVFallback != "" {
-		guideSource, guideLocation = "url", cfg.XMLTVFallback
+	if cfg.XMLTVFallback != "" {
+		guideSource, guideLocation := "url", cfg.XMLTVFallback
 		if _, err := os.Stat(cfg.XMLTVFallback); err == nil {
 			guideSource = "file"
 		}
+		go guide.RunScheduler(ctx, refresh, guideSource, guideLocation, logger)
+	} else {
+		go guide.RunHDHomeRunScheduler(ctx, refresh, tuner.Address, logger)
 	}
-	go guide.RunScheduler(ctx, refresh, guideSource, guideLocation, logger)
 	renderDevice := cfg.GPURenderDevice
 	if cfg.GPUMode != "software" && renderDevice == "" {
 		if detected, err := recording.DetectRenderDevice("/dev/dri", "/sys/class/drm", ""); err == nil {
@@ -56,20 +63,20 @@ func main() {
 	}
 	tuners := recording.NewTunerPool(cfg.TunerCount)
 	recorder := recording.NewSupervisor(database, recording.SupervisorConfig{
-		HDHomeRunIP:   cfg.HDHomeRunIP,
-		RecordingsDir: cfg.RecordingsDir,
-		Profile:       profile,
-		Pool:          tuners,
+		HDHomeRunAddress: tuner.Address,
+		RecordingsDir:    cfg.RecordingsDir,
+		Profile:          profile,
+		Pool:             tuners,
 	}, logger)
 	live := recording.NewLiveManager(ctx, recording.LiveConfig{
-		HDHomeRunIP: cfg.HDHomeRunIP, RecordingsDir: cfg.RecordingsDir, Profile: profile, Pool: tuners,
+		HDHomeRunAddress: tuner.Address, RecordingsDir: cfg.RecordingsDir, Profile: profile, Pool: tuners,
 	}, logger)
 	recorderDone := make(chan struct{})
 	go func() {
 		recorder.Run(ctx)
 		close(recorderDone)
 	}()
-	server := &http.Server{Addr: cfg.HTTPAddr, Handler: httpapi.New(cfg, database, refresh, recorder, live, tuners, logger)}
+	server := &http.Server{Addr: cfg.HTTPAddr, Handler: httpapi.New(cfg, tuner, database, refresh, recorder, live, tuners, logger)}
 	logger.Info("CatchUp DVR listening", "address", cfg.HTTPAddr)
 	go func() {
 		<-ctx.Done()

@@ -31,6 +31,8 @@ type Store interface {
 	AuthCredentials(context.Context) (model.AuthCredentials, bool, error)
 	CreateAuthCredentials(context.Context, model.AuthCredentials) error
 	UpdateAuthCredentials(context.Context, model.AuthCredentials) error
+	HDHomeRunAddress(context.Context) (string, error)
+	SetHDHomeRunAddress(context.Context, string) error
 	FavoriteChannels(context.Context, string) ([]string, error)
 	SetFavoriteChannel(context.Context, string, string, bool) error
 	Ping(context.Context) error
@@ -51,6 +53,7 @@ type TunerCounter interface {
 
 type Server struct {
 	config   config.Config
+	tuner    *config.TunerAddress
 	store    Store
 	refresh  guide.RefreshService
 	logger   *slog.Logger
@@ -60,14 +63,19 @@ type Server struct {
 	auth     *authService
 }
 
-func New(cfg config.Config, store Store, refresh guide.RefreshService, recorder RecordingController, live LiveController, tuners TunerCounter, logger *slog.Logger) http.Handler {
-	server := &Server{config: cfg, store: store, refresh: refresh, recorder: recorder, live: live, tuners: tuners, logger: logger, auth: newAuthService(store)}
+func New(cfg config.Config, tuner *config.TunerAddress, store Store, refresh guide.RefreshService, recorder RecordingController, live LiveController, tuners TunerCounter, logger *slog.Logger) http.Handler {
+	if tuner == nil {
+		tuner = config.NewTunerAddress("")
+	}
+	server := &Server{config: cfg, tuner: tuner, store: store, refresh: refresh, recorder: recorder, live: live, tuners: tuners, logger: logger, auth: newAuthService(store)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/auth/status", server.authStatus)
 	mux.HandleFunc("POST /api/auth/setup", server.setupAccount)
 	mux.HandleFunc("POST /api/auth/login", server.login)
 	mux.HandleFunc("POST /api/auth/logout", server.logout)
 	mux.HandleFunc("POST /api/auth/password", server.changePassword)
+	mux.HandleFunc("POST /api/setup/tuner/test", server.testTunerConnection)
+	mux.HandleFunc("POST /api/setup/tuner", server.configureTuner)
 	mux.HandleFunc("GET /api/health", server.health)
 	mux.HandleFunc("GET /api/diagnostics", server.diagnostics)
 	mux.HandleFunc("GET /api/guide/days", server.getGuideDays)
@@ -101,7 +109,7 @@ func (s *Server) diagnostics(w http.ResponseWriter, r *http.Request) {
 	device, deviceErr := recording.DetectRenderDevice("/dev/dri", "/sys/class/drm", s.config.GPURenderDevice)
 	tunersInUse, tunerCount := s.tuners.Usage()
 	response := map[string]any{
-		"database": "ok", "tunerCount": tunerCount, "tunersInUse": tunersInUse, "tunersAvailable": max(0, tunerCount-tunersInUse), "hdHomeRunConfigured": s.config.HDHomeRunIP != "",
+		"database": "ok", "tunerCount": tunerCount, "tunersInUse": tunersInUse, "tunersAvailable": max(0, tunerCount-tunersInUse), "hdHomeRunConfigured": s.tuner.Address() != "",
 		"recordingsDir": s.config.RecordingsDir, "gpuMode": s.config.GPUMode, "renderDevice": device,
 		"recordingEngine": "enabled",
 	}
@@ -200,7 +208,7 @@ func (s *Server) refreshGuide(w http.ResponseWriter, r *http.Request) {
 	}
 	if request.Location == "" {
 		if request.Source == "hdhomerun" {
-			request.Location = s.config.HDHomeRunIP
+			request.Location = s.tuner.Address()
 		} else {
 			request.Location = s.config.XMLTVFallback
 		}

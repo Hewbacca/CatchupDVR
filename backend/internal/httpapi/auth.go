@@ -154,7 +154,12 @@ func (s *Server) authStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "could not verify session")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"setupRequired": !configured, "authenticated": authenticated})
+	address, err := s.store.HDHomeRunAddress(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not read tuner settings")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"setupRequired": !configured, "authenticated": authenticated, "tunerSetupRequired": s.tunerSetupRequired(configured, address)})
 }
 
 func (s *Server) setupAccount(w http.ResponseWriter, r *http.Request) {
@@ -176,7 +181,7 @@ func (s *Server) setupAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.setSession(w, r, credentials)
-	writeJSON(w, http.StatusCreated, map[string]bool{"authenticated": true})
+	writeJSON(w, http.StatusCreated, map[string]bool{"setupRequired": false, "authenticated": true, "tunerSetupRequired": s.tunerSetupRequired(true, "")})
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
@@ -198,7 +203,63 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.setSession(w, r, credentials)
-	writeJSON(w, http.StatusOK, map[string]bool{"authenticated": true})
+	address, err := s.store.HDHomeRunAddress(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not read tuner settings")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"setupRequired": false, "authenticated": true, "tunerSetupRequired": s.tunerSetupRequired(true, address)})
+}
+
+func (s *Server) tunerSetupRequired(accountConfigured bool, address string) bool {
+	return accountConfigured && strings.TrimSpace(address) == "" && strings.TrimSpace(s.config.XMLTVFallback) == ""
+}
+
+func (s *Server) testTunerConnection(w http.ResponseWriter, r *http.Request) {
+	address, err := s.verifyTunerConnection(r)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"connected": true, "address": address})
+}
+
+func (s *Server) configureTuner(w http.ResponseWriter, r *http.Request) {
+	address, err := s.verifyTunerConnection(r)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if err := s.store.SetHDHomeRunAddress(r.Context(), address); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not save tuner settings")
+		return
+	}
+	s.tuner.SetAddress(address)
+	go s.refreshGuideAfterTunerSetup(address)
+	writeJSON(w, http.StatusOK, map[string]any{"configured": true, "address": address})
+}
+
+func (s *Server) verifyTunerConnection(r *http.Request) (string, error) {
+	var request struct {
+		Address string `json:"address"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		return "", errors.New("HDHomeRun address is required")
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
+	defer cancel()
+	return s.refresh.Fetcher.TestHDHomeRun(ctx, request.Address)
+}
+
+func (s *Server) refreshGuideAfterTunerSetup(address string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	channels, programs, err := s.refresh.Refresh(ctx, "hdhomerun", address)
+	if err != nil {
+		s.logger.Warn("initial guide refresh failed; it will retry automatically", "error", err)
+		return
+	}
+	s.logger.Info("initial guide refreshed", "channels", channels, "programs", programs)
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {

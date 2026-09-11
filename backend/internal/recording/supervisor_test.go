@@ -43,7 +43,7 @@ func TestSupervisorCapturesAndCompletesDueRecording(t *testing.T) {
 		ScheduledStart: now.Add(-time.Minute), ScheduledEnd: now.Add(40 * time.Millisecond),
 	}}
 	supervisor := NewSupervisor(repository, SupervisorConfig{
-		HDHomeRunIP: "192.168.0.103", RecordingsDir: t.TempDir(),
+		HDHomeRunAddress: func() string { return "192.168.0.103" }, RecordingsDir: t.TempDir(),
 		Profile: Profile{Mode: "software"}, PollInterval: 5 * time.Millisecond,
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	supervisor.newProcess = func(command Command, _ io.Writer) process {
@@ -80,7 +80,7 @@ func TestDeleteStopsActiveRecordingAndRemovesOutput(t *testing.T) {
 	}}
 	root := t.TempDir()
 	supervisor := NewSupervisor(repository, SupervisorConfig{
-		HDHomeRunIP: "192.168.0.103", RecordingsDir: root,
+		HDHomeRunAddress: func() string { return "192.168.0.103" }, RecordingsDir: root,
 		Profile: Profile{Mode: "software"}, PollInterval: 5 * time.Millisecond,
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	supervisor.newProcess = func(command Command, _ io.Writer) process {

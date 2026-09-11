@@ -134,6 +134,16 @@ h1 { font-size: clamp(1.8rem, 4vw, 2.8rem); line-height: 1; margin: 0; }
 .auth-error { margin: 0; color: #ff9ba1; font-size: .9rem; line-height: 1.4; }
 .auth-loading { text-align: center; }
 .auth-loading .auth-icon { margin-inline: auto; }
+.tuner-setup-card code { padding: 2px 5px; border-radius: 5px; color: #c8d8e9; background: #091726; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; }
+.tuner-test { width: 100%; }
+.tuner-connection { display: flex; align-items: flex-start; gap: 8px; margin: -2px 0 0; font-size: .88rem; line-height: 1.4; }
+.tuner-connection span { flex: 0 0 auto; width: 9px; height: 9px; margin-top: .22em; border-radius: 50%; background: #657386; }
+.tuner-connection.testing { color: var(--muted); }
+.tuner-connection.testing span { background: #f4c86a; box-shadow: 0 0 9px rgba(244,200,106,.45); }
+.tuner-connection.success { color: var(--accent); }
+.tuner-connection.success span { background: var(--accent); box-shadow: 0 0 9px rgba(94,234,212,.55); }
+.tuner-connection.error { color: #ff9ba1; }
+.tuner-connection.error span { background: var(--record); box-shadow: 0 0 9px rgba(251,90,98,.55); }
 
 .settings-backdrop { position: fixed; z-index: 55; inset: 0; display: flex; justify-content: flex-end; background: rgba(2,7,14,.6); backdrop-filter: blur(5px); }
 .settings-panel { position: relative; width: min(460px, 100%); min-height: 100%; padding: max(76px, calc(env(safe-area-inset-top) + 38px)) clamp(24px, 6vw, 42px) 42px; background: #0e1d2f; border-left: 1px solid #2c4057; box-shadow: -30px 0 80px rgba(0,0,0,.35); animation: slide-in .2s ease-out; }

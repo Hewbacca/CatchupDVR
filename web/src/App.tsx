@@ -4,6 +4,7 @@ import { AuthScreen } from './AuthScreen'
 import { GuideGrid } from './GuideGrid'
 import { readResumePositions, writeResumePositions } from './resume'
 import { SettingsPanel } from './SettingsPanel'
+import { TunerSetupScreen } from './TunerSetupScreen'
 import type { AuthStatus } from './api'
 import type { Diagnostics, Guide, Program, Recording } from './types'
 
@@ -91,9 +92,9 @@ export default function App() {
   }, [from, to])
 
   useEffect(() => { void loadAuth() }, [loadAuth])
-  useEffect(() => { if (auth?.authenticated) void load() }, [auth?.authenticated, load])
+  useEffect(() => { if (auth?.authenticated && !auth.tunerSetupRequired) void load() }, [auth?.authenticated, auth?.tunerSetupRequired, load])
   useEffect(() => {
-    if (!auth?.authenticated) return
+    if (!auth?.authenticated || auth.tunerSetupRequired) return
     let active = true
     const refresh = async () => {
       try {
@@ -105,9 +106,9 @@ export default function App() {
     }
     const timer = window.setInterval(() => void refresh(), 5000)
     return () => { active = false; window.clearInterval(timer) }
-  }, [auth?.authenticated])
+  }, [auth?.authenticated, auth?.tunerSetupRequired])
   useEffect(() => {
-    if (!auth?.authenticated || view !== 'recordings') return
+    if (!auth?.authenticated || auth.tunerSetupRequired || view !== 'recordings') return
     let active = true
     const refresh = async () => {
       try {
@@ -120,10 +121,10 @@ export default function App() {
     void refresh()
     const timer = window.setInterval(() => void refresh(), 4000)
     return () => { active = false; window.clearInterval(timer) }
-  }, [auth?.authenticated, view])
+  }, [auth?.authenticated, auth?.tunerSetupRequired, view])
   useEffect(() => {
     const query = guideSearch.trim()
-    if (!auth?.authenticated || !query) {
+    if (!auth?.authenticated || auth.tunerSetupRequired || !query) {
       setSearchResults([])
       setSearchIndex(0)
       setSearching(false)
@@ -146,7 +147,7 @@ export default function App() {
       })
     }, 250)
     return () => { active = false; window.clearTimeout(timer) }
-  }, [auth?.authenticated, guideSearch])
+  }, [auth?.authenticated, auth?.tunerSetupRequired, guideSearch])
   useEffect(() => {
     if (!toast) return
     const timer = window.setTimeout(() => setToast(null), 4500)
@@ -316,14 +317,15 @@ export default function App() {
     }
     try {
       await logout()
-      setPlaying(null); setSelected(null); setSettingsOpen(false); setGuide(null); setGuideDays([]); setGuideSearch(''); setSearchResults([]); setFavoriteChannels(new Set()); setRecordings([]); setDiagnostics(null); setAuth({ setupRequired: false, authenticated: false })
+      setPlaying(null); setSelected(null); setSettingsOpen(false); setGuide(null); setGuideDays([]); setGuideSearch(''); setSearchResults([]); setFavoriteChannels(new Set()); setRecordings([]); setDiagnostics(null); setAuth({ setupRequired: false, authenticated: false, tunerSetupRequired: false })
     } catch (error) {
       setToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not sign out' })
     }
   }
 
   if (!auth) return <main className="auth-page"><section className="auth-card auth-loading"><img src="/icon.svg" alt="" className="auth-icon" /><h1>Connecting to CatchUp…</h1>{authError && <><p className="auth-error">{authError}</p><button className="subtle" onClick={() => void loadAuth()}>Try again</button></>}</section><footer className="app-version">CatchUp DVR v{APP_VERSION}</footer></main>
-  if (!auth.authenticated) return <><AuthScreen setupRequired={auth.setupRequired} onAuthenticated={() => setAuth({ setupRequired: false, authenticated: true })} /><footer className="app-version">CatchUp DVR v{APP_VERSION}</footer></>
+  if (!auth.authenticated) return <><AuthScreen setupRequired={auth.setupRequired} onAuthenticated={() => void loadAuth()} /><footer className="app-version">CatchUp DVR v{APP_VERSION}</footer></>
+  if (auth.tunerSetupRequired) return <><TunerSetupScreen onConfigured={() => void loadAuth()} /><footer className="app-version">CatchUp DVR v{APP_VERSION}</footer></>
 
   return (
     <div className="app-shell">

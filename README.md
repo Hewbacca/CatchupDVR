@@ -41,16 +41,26 @@ curl -X POST http://localhost:8080/api/admin/guide/refresh \
   -d '{"source":"file","location":"backend/testdata/guide.xml"}'
 ```
 
-## Install on Linux Mint
+## Run the container
 
-The development image is `ghcr.io/hewbacca/catchupdvr:edge`; a stable release will use `:latest` after real chase-play passes its acceptance test. Publishing is automated by [the GitHub workflow](.github/workflows/container.yml) after this repository is pushed to GitHub. The package must be changed from private to public once after its first publish so the Linux server can pull it without a registry login.
-
-On the Linux server, run:
+Podman or Docker is a prerequisite. Pull and run the published image with persistent folders for the database and recordings:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Hewbacca/CatchupDVR/main/deploy/install.sh | bash -s -- HDHOMERUN_IP /optional/recordings/path
+mkdir -p catchup-dvr/data catchup-dvr/recordings
+podman pull ghcr.io/hewbacca/catchupdvr:edge
+podman run -d --name catchup-dvr --restart unless-stopped --network host \
+  -e HTTP_ADDR=:8095 \
+  -e DATABASE_PATH=/data/catchup.db \
+  -e RECORDINGS_DIR=/recordings \
+  -e TUNER_COUNT=2 \
+  --device /dev/dri:/dev/dri \
+  -v "$(pwd)/catchup-dvr/data:/data:Z" \
+  -v "$(pwd)/catchup-dvr/recordings:/recordings:Z" \
+  ghcr.io/hewbacca/catchupdvr:edge
 ```
 
-The installer detects the Intel render device, pulls the image, writes the local configuration, starts the service, and verifies its health. See [the installation guide](deploy/README.md) for overrides and updates.
+Open `http://SERVER_IP:8095`, create the first account, then enter the HDHomeRun address or use `hdhomerun.local` and test it. The password and tuner address are stored in the mounted database. For the ready-to-run Compose definition, see [deploy/README.md](deploy/README.md).
 
-For development from source, copy `.env.example` to `.env`, set `HDHOMERUN_IP`, and run `podman compose up -d --build`.
+To update, run `podman pull ghcr.io/hewbacca/catchupdvr:edge`, then recreate the container using the same command. Docker users can substitute `docker` for `podman`.
+
+For development from source, copy `.env.example` to `.env` and run `podman compose up -d --build`. Connect the tuner from first-run setup.

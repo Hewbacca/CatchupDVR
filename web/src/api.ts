@@ -7,19 +7,33 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T
 }
 
-export type AuthStatus = { setupRequired: boolean; authenticated: boolean }
+export type AuthStatus = { setupRequired: boolean; authenticated: boolean; tunerSetupRequired: boolean }
 
 export function getAuthStatus() { return request<AuthStatus>('/api/auth/status') }
 
 export function setupAccount(username: string, password: string) {
-  return request<{ authenticated: boolean }>('/api/auth/setup', {
+  return request<AuthStatus>('/api/auth/setup', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }),
   })
 }
 
 export function login(username: string, password: string) {
-  return request<{ authenticated: boolean }>('/api/auth/login', {
+  return request<AuthStatus>('/api/auth/login', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }),
+  })
+}
+
+export type TunerConnection = { connected: boolean; address: string }
+
+export function testTunerConnection(address: string) {
+  return request<TunerConnection>('/api/setup/tuner/test', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ address }),
+  })
+}
+
+export function configureTuner(address: string) {
+  return request<{ configured: boolean; address: string }>('/api/setup/tuner', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ address }),
   })
 }
 

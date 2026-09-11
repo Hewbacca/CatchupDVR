@@ -27,12 +27,12 @@ type LiveSession struct {
 }
 
 type LiveConfig struct {
-	HDHomeRunIP   string
-	RecordingsDir string
-	Profile       Profile
-	Pool          *TunerPool
-	ReadyTimeout  time.Duration
-	MaxDuration   time.Duration
+	HDHomeRunAddress func() string
+	RecordingsDir    string
+	Profile          Profile
+	Pool             *TunerPool
+	ReadyTimeout     time.Duration
+	MaxDuration      time.Duration
 }
 
 type LiveManager struct {
@@ -58,6 +58,9 @@ type liveJob struct {
 }
 
 func NewLiveManager(ctx context.Context, config LiveConfig, logger *slog.Logger) *LiveManager {
+	if config.HDHomeRunAddress == nil {
+		config.HDHomeRunAddress = func() string { return "" }
+	}
 	if config.Pool == nil {
 		config.Pool = NewTunerPool(1)
 	}
@@ -86,7 +89,7 @@ func NewLiveManager(ctx context.Context, config LiveConfig, logger *slog.Logger)
 }
 
 func (m *LiveManager) Start(ctx context.Context, channelNumber, title string) (LiveSession, error) {
-	inputURL, err := HDHomeRunStreamURL(m.config.HDHomeRunIP, channelNumber)
+	inputURL, err := HDHomeRunStreamURL(m.config.HDHomeRunAddress(), channelNumber)
 	if err != nil {
 		return LiveSession{}, err
 	}

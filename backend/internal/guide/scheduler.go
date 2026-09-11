@@ -40,3 +40,34 @@ func RunScheduler(ctx context.Context, service RefreshService, source, location 
 		logger.Info("guide refreshed", "channels", channels, "programs", programs, "nextRefreshIn", delay)
 	}
 }
+
+// RunHDHomeRunScheduler reads the saved tuner address before each attempt so a
+// first-run setup can enable guide refreshes without restarting the service.
+func RunHDHomeRunScheduler(ctx context.Context, service RefreshService, address func() string, logger *slog.Logger) {
+	delay := time.Duration(0)
+	for {
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		location := ""
+		if address != nil {
+			location = address()
+		}
+		if location == "" {
+			delay = retryDelay
+			continue
+		}
+		channels, programs, err := service.Refresh(ctx, "hdhomerun", location)
+		if err != nil {
+			logger.Warn("guide refresh failed; retaining last successful guide", "error", err, "retryIn", retryDelay)
+			delay = retryDelay
+			continue
+		}
+		delay = NextRefreshDelay()
+		logger.Info("guide refreshed", "channels", channels, "programs", programs, "nextRefreshIn", delay)
+	}
+}

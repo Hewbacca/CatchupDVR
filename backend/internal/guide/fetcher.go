@@ -24,23 +24,12 @@ type discovery struct {
 }
 
 func (f Fetcher) HDHomeRun(ctx context.Context, host string) ([]byte, error) {
-	host = strings.TrimRight(strings.TrimSpace(host), "/")
-	if host == "" {
-		return nil, fmt.Errorf("HDHomeRun address is not configured")
-	}
-	if !strings.HasPrefix(host, "http://") && !strings.HasPrefix(host, "https://") {
-		host = "http://" + host
-	}
-	data, err := f.fetch(ctx, host+"/discover.json")
+	host, device, err := f.discover(ctx, host)
 	if err != nil {
-		return f.cached(fmt.Errorf("discover HDHomeRun: %w", err))
-	}
-	var device discovery
-	if err := json.Unmarshal(data, &device); err != nil || device.DeviceAuth == "" {
-		return f.cached(fmt.Errorf("discover response has no DeviceAuth"))
+		return f.cached(err)
 	}
 	guideURL := "https://api.hdhomerun.com/api/xmltv?DeviceAuth=" + url.QueryEscape(device.DeviceAuth)
-	data, err = f.fetch(ctx, guideURL)
+	data, err := f.fetch(ctx, guideURL)
 	if err != nil {
 		return f.cached(fmt.Errorf("download HDHomeRun guide: %w", err))
 	}
@@ -48,6 +37,52 @@ func (f Fetcher) HDHomeRun(ctx context.Context, host string) ([]byte, error) {
 		return nil, err
 	}
 	return data, nil
+}
+
+// TestHDHomeRun confirms that the supplied address reaches an HDHomeRun and
+// exposes the DeviceAuth value needed for guide downloads. It intentionally
+// stops at discovery so a working tuner is not rejected because an unrelated
+// guide-provider request is temporarily unavailable.
+func (f Fetcher) TestHDHomeRun(ctx context.Context, address string) (string, error) {
+	host, _, err := f.discover(ctx, address)
+	return host, err
+}
+
+func (f Fetcher) discover(ctx context.Context, address string) (string, discovery, error) {
+	host, err := NormalizeHDHomeRunAddress(address)
+	if err != nil {
+		return "", discovery{}, err
+	}
+	data, err := f.fetch(ctx, "http://"+host+"/discover.json")
+	if err != nil {
+		return "", discovery{}, fmt.Errorf("discover HDHomeRun: %w", err)
+	}
+	var device discovery
+	if err := json.Unmarshal(data, &device); err != nil || device.DeviceAuth == "" {
+		return "", discovery{}, fmt.Errorf("discover response has no DeviceAuth")
+	}
+	return host, device, nil
+}
+
+// NormalizeHDHomeRunAddress accepts a bare IPv4 address or hostname such as
+// hdhomerun.local. Schemes, paths, credentials, and ports are intentionally
+// excluded: CatchUp always reaches the tuner through its standard endpoints.
+func NormalizeHDHomeRunAddress(address string) (string, error) {
+	address = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(address)), ".")
+	if address == "" || len(address) > 253 || strings.ContainsAny(address, ":/?#@[]\\") {
+		return "", fmt.Errorf("enter an HDHomeRun IP address or hostname")
+	}
+	for _, label := range strings.Split(address, ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return "", fmt.Errorf("enter an HDHomeRun IP address or hostname")
+		}
+		for _, character := range label {
+			if !(character >= 'a' && character <= 'z') && !(character >= '0' && character <= '9') && character != '-' {
+				return "", fmt.Errorf("enter an HDHomeRun IP address or hostname")
+			}
+		}
+	}
+	return address, nil
 }
 
 func (f Fetcher) URL(ctx context.Context, location string) ([]byte, error) {

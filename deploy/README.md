@@ -1,36 +1,29 @@
-# Install on the Linux Mint server
+# Run CatchUp DVR
 
-Once the image is published, installation needs only the HDHomeRun IP address. This one command downloads the installer and starts CatchUp DVR:
+Podman or Docker is a prerequisite. The image is `ghcr.io/hewbacca/catchupdvr:edge`.
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/Hewbacca/CatchupDVR/main/deploy/install.sh | bash -s -- 192.168.0.103
-```
+## Compose
 
-The installer verifies Podman Compose, checks the tuner, selects the Intel `/dev/dri/renderD*` device, creates private configuration, pulls the image, starts the container, and waits for a successful health check.
-
-The first GHCR publish is private by default. In GitHub, open the new `catchupdvr` package, choose **Package settings → Change visibility → Public** once. Public GHCR images can then be pulled by Podman without a login.
-
-By default it stores everything under `./catchup-dvr`. To put recordings on a large disk:
+This directory contains a ready-to-run Compose file. From this directory:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Hewbacca/CatchupDVR/main/deploy/install.sh | bash -s -- 192.168.0.103 /mnt/dvr-recordings
+podman compose pull
+podman compose up -d
 ```
 
-Open `http://LINUX_SERVER_IP:8095` from the iPad or Android phone. On the first visit, create the one local CatchUp account; its password is stored only as a secure hash in the mounted database. Install it from the browser's Share/Add to Home Screen menu.
+It stores the database in `./data` and recordings in `./recordings`. Change those two bind mounts in [compose.yml](compose.yml) before starting if the recordings belong on another disk.
 
-If the repository is checked out locally, update later with:
+## First run
+
+Open `http://SERVER_IP:8095`. Create an account, enter the HDHomeRun IP address or retain `hdhomerun.local`, and use **Test connection** before finishing. CatchUp stores the account and tuner address in `./data/catchup.db`.
+
+## Updates
+
+From this directory, run:
 
 ```sh
-./deploy/update.sh
+podman compose pull
+podman compose up -d
 ```
 
-Without a checkout, update with `cd catchup-dvr && podman compose pull && podman compose up -d`.
-
-## Optional overrides
-
-- `CATCHUP_IMAGE`: image and tag to pull. Default during development: `ghcr.io/hewbacca/catchupdvr:edge`.
-- `CATCHUP_INSTALL_DIR`: directory for compose configuration and the database.
-- `CATCHUP_PORT`: host-network HTTP port. Default: `8095`.
-- `CATCHUP_DATA_DIR`: database and guide-cache directory.
-
-For internet access, keep the service behind a TLS reverse proxy such as Caddy. Do not forward its port from the router or expose it directly to the internet.
+For internet access, keep CatchUp behind a TLS reverse proxy such as Caddy. Do not forward its port from the router or expose it directly to the internet.

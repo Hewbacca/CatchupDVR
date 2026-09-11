@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
+	"sync"
 )
 
 type Config struct {
@@ -10,7 +12,6 @@ type Config struct {
 	DatabasePath    string
 	RecordingsDir   string
 	WebDir          string
-	HDHomeRunIP     string
 	XMLTVFallback   string
 	TunerCount      int
 	FFmpegPath      string
@@ -27,7 +28,6 @@ func FromEnv() Config {
 		DatabasePath:    env("DATABASE_PATH", "./data/catchup.db"),
 		RecordingsDir:   env("RECORDINGS_DIR", "./recordings"),
 		WebDir:          env("WEB_DIR", "../web/dist"),
-		HDHomeRunIP:     os.Getenv("HDHOMERUN_IP"),
 		XMLTVFallback:   os.Getenv("XMLTV_FALLBACK"),
 		TunerCount:      envInt("TUNER_COUNT", 2),
 		FFmpegPath:      env("FFMPEG_PATH", "ffmpeg"),
@@ -37,6 +37,36 @@ func FromEnv() Config {
 		PostPadding:     envInt("POST_PADDING_MINUTES", 5),
 		Deinterlace:     envBool("DEINTERLACE", true),
 	}
+}
+
+// TunerAddress is the in-memory view of the address saved in the local
+// database. It lets a completed first-run setup take effect immediately,
+// without requiring a container restart.
+type TunerAddress struct {
+	mu      sync.RWMutex
+	address string
+}
+
+func NewTunerAddress(address string) *TunerAddress {
+	return &TunerAddress{address: strings.TrimSpace(address)}
+}
+
+func (a *TunerAddress) Address() string {
+	if a == nil {
+		return ""
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.address
+}
+
+func (a *TunerAddress) SetAddress(address string) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	a.address = strings.TrimSpace(address)
+	a.mu.Unlock()
 }
 
 func envBool(key string, fallback bool) bool {

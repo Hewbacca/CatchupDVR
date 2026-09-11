@@ -19,7 +19,7 @@ or depending on a paid service for its core DVR functionality.
 - `backend/internal/store/`: SQLite schema/migrations and persistence methods.
 - `backend/testdata/guide.xml`: local XMLTV fixture.
 - `web/`: React + TypeScript single-page application.
-- `deploy/`: Linux installation and update scripts plus deployment compose file.
+- `deploy/`: ready-to-run deployment Compose file and its usage notes.
 - `Containerfile`: multi-stage production image build.
 - `compose.yml`: source-based Linux/Podman development deployment.
 
@@ -43,6 +43,9 @@ large implementation notes here.
 - Authentication is first-run account creation with a bcrypt password hash and
   signed session stored locally in SQLite. Never add real credentials, tokens,
   hostnames, IP addresses, or user-specific paths to committed files.
+- The HDHomeRun address is collected and connection-tested after first-run
+  account creation, then saved in the local database. Do not restore it as an
+  environment variable or external setup prompt.
 - Preferences such as favorite channels belong to the authenticated user on the
   server, not only in browser storage.
 - Station logos are automatic and server-side. Prefer a valid XMLTV channel

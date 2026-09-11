@@ -5,8 +5,8 @@ The development Mac is not evidence that tuner, VA-API, or sustained chase play 
 1. Confirm the HDHomeRun is reachable and note its current device data:
 
    ```sh
-   curl -fsS http://192.168.0.103/discover.json
-   curl -fsS http://192.168.0.103/lineup.json
+   curl -fsS http://hdhomerun.local/discover.json
+   curl -fsS http://hdhomerun.local/lineup.json
    ```
 
 2. Confirm the Intel render node and driver:
@@ -17,7 +17,7 @@ The development Mac is not evidence that tuner, VA-API, or sustained chase play 
    podman run --rm --device /dev/dri:/dev/dri catchup-dvr vainfo --display drm --device /dev/dri/renderD128
    ```
 
-3. Set `HDHOMERUN_IP` and, only if auto-detection is wrong, `GPU_RENDER_DEVICE`. Start the service and check `/api/diagnostics`.
+3. Start the service, create the first account, and verify the HDHomeRun connection in setup. Only if auto-detection is wrong, set `GPU_RENDER_DEVICE`, then check `/api/diagnostics`.
 
 4. Refresh the guide twice and verify logs show a discovery request before each XMLTV request. Temporarily break WAN access and verify the previous guide remains visible.
 
