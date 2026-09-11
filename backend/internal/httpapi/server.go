@@ -67,6 +67,7 @@ func (s *Server) diagnostics(w http.ResponseWriter, r *http.Request) {
 	response := map[string]any{
 		"database": "ok", "tunerCount": s.config.TunerCount, "hdHomeRunConfigured": s.config.HDHomeRunIP != "",
 		"recordingsDir": s.config.RecordingsDir, "gpuMode": s.config.GPUMode, "renderDevice": device,
+		"recordingEngine": "enabled",
 	}
 	if deviceErr != nil {
 		response["gpuWarning"] = deviceErr.Error()

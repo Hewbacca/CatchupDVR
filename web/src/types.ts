@@ -31,6 +31,11 @@ export type Recording = {
   scheduledEnd: string
   status: 'scheduled' | 'recording' | 'completed' | 'failed' | 'cancelled'
   playlistPath?: string
+  processId?: number
+  startedAt?: string
+  finishedAt?: string
+  heartbeatAt?: string
+  errorMessage?: string
   createdAt: string
 }
 
@@ -42,5 +47,5 @@ export type Diagnostics = {
   gpuMode: string
   renderDevice: string
   gpuWarning?: string
+  recordingEngine: string
 }
-

@@ -84,6 +84,7 @@ h1 { font-size: clamp(1.8rem, 4vw, 2.8rem); line-height: 1; margin: 0; }
 .status-art.recording { background: linear-gradient(145deg, #782b39, #3c1823); color: #fff; }
 .recording-info h2 { margin: 2px 0 4px; font-size: 1.15rem; }
 .recording-info p { margin: 0; color: var(--muted); font-size: .85rem; }
+.recording-info .recording-error { margin-top: 7px; color: #ff9ba1; }
 .status-label { color: var(--accent); font-size: .7rem; text-transform: uppercase; letter-spacing: .11em; font-weight: 800; }
 .recording-actions { display: flex; gap: 8px; }
 .subtle { border: 1px solid var(--line); border-radius: 9px; padding: 11px 15px; background: transparent; color: var(--ink); cursor: pointer; }

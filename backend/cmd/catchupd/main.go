@@ -13,6 +13,7 @@ import (
 	"github.com/Hewbacca/CatchupDVR/backend/internal/config"
 	"github.com/Hewbacca/CatchupDVR/backend/internal/guide"
 	"github.com/Hewbacca/CatchupDVR/backend/internal/httpapi"
+	"github.com/Hewbacca/CatchupDVR/backend/internal/recording"
 	"github.com/Hewbacca/CatchupDVR/backend/internal/store"
 )
 
@@ -39,6 +40,29 @@ func main() {
 		}
 	}
 	go guide.RunScheduler(ctx, refresh, guideSource, guideLocation, logger)
+	renderDevice := cfg.GPURenderDevice
+	if cfg.GPUMode != "software" && renderDevice == "" {
+		if detected, err := recording.DetectRenderDevice("/dev/dri", "/sys/class/drm", ""); err == nil {
+			renderDevice = detected
+		} else if cfg.GPUMode == "auto" {
+			logger.Warn("no render device detected; recordings will use software encoding", "error", err)
+		}
+	}
+	recorder := recording.NewSupervisor(database, recording.SupervisorConfig{
+		HDHomeRunIP:   cfg.HDHomeRunIP,
+		RecordingsDir: cfg.RecordingsDir,
+		Profile: recording.Profile{
+			FFmpegPath:   cfg.FFmpegPath,
+			Mode:         cfg.GPUMode,
+			RenderDevice: renderDevice,
+			Deinterlace:  cfg.Deinterlace,
+		},
+	}, logger)
+	recorderDone := make(chan struct{})
+	go func() {
+		recorder.Run(ctx)
+		close(recorderDone)
+	}()
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: httpapi.New(cfg, database, refresh, logger)}
 	logger.Info("CatchUp DVR listening", "address", cfg.HTTPAddr)
 	go func() {
@@ -47,8 +71,11 @@ func main() {
 		defer cancel()
 		_ = server.Shutdown(shutdownCtx)
 	}()
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		logger.Error("server stopped", "error", err)
+	serverErr := server.ListenAndServe()
+	stop()
+	<-recorderDone
+	if serverErr != nil && serverErr != http.ErrServerClosed {
+		logger.Error("server stopped", "error", serverErr)
 		os.Exit(1)
 	}
 }

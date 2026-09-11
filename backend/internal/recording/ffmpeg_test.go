@@ -11,7 +11,7 @@ import (
 func TestBuildCommandPreservesChasePlayContract(t *testing.T) {
 	command := BuildCommand(Profile{Mode: "vaapi", RenderDevice: "/dev/dri/renderD129", Deinterlace: true}, "http://tuner:5004/auto/v7.1", "/recordings/42")
 	joined := strings.Join(command.Args, " ")
-	for _, required := range []string{"-hls_playlist_type event", "-hls_time 4", "append_list+independent_segments+program_date_time+temp_file", "deinterlace_vaapi", "h264_vaapi", "segment-%09d.ts"} {
+	for _, required := range []string{"-hls_playlist_type event", "-hls_time 4", "append_list+discont_start+independent_segments+program_date_time+temp_file", "deinterlace_vaapi", "h264_vaapi", "segment-%09d.ts"} {
 		if !strings.Contains(joined, required) {
 			t.Errorf("missing %q in %s", required, joined)
 		}

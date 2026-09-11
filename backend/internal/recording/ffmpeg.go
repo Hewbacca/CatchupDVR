@@ -78,7 +78,7 @@ func BuildCommand(profile Profile, inputURL, outputDir string) Command {
 		"-force_key_frames", "expr:gte(t,n_forced*4)",
 		"-c:a", "aac", "-b:a", "160k", "-ac", "2",
 		"-f", "hls", "-hls_time", "4", "-hls_playlist_type", "event",
-		"-hls_flags", "append_list+independent_segments+program_date_time+temp_file",
+		"-hls_flags", "append_list+discont_start+independent_segments+program_date_time+temp_file",
 		"-hls_segment_filename", filepath.Join(outputDir, "segment-%09d.ts"),
 		filepath.Join(outputDir, "index.m3u8"),
 	)

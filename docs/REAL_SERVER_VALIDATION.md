@@ -5,8 +5,8 @@ The development Mac is not evidence that tuner, VA-API, or sustained chase play 
 1. Confirm the HDHomeRun is reachable and note its current device data:
 
    ```sh
-   curl -fsS http://HDHOMERUN_IP/discover.json
-   curl -fsS http://HDHOMERUN_IP/lineup.json
+   curl -fsS http://192.168.0.103/discover.json
+   curl -fsS http://192.168.0.103/lineup.json
    ```
 
 2. Confirm the Intel render node and driver:
@@ -34,4 +34,3 @@ The development Mac is not evidence that tuner, VA-API, or sustained chase play 
    - let a normal recording finish and confirm `#EXT-X-ENDLIST` is present.
 
 7. AirPlay from iPad Safari and confirm audio/video remain synchronized after seeking.
-

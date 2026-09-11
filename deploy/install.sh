@@ -58,6 +58,7 @@ services:
       GPU_RENDER_DEVICE: ${GPU_RENDER_DEVICE:-}
       PRE_PADDING_MINUTES: ${PRE_PADDING_MINUTES:-2}
       POST_PADDING_MINUTES: ${POST_PADDING_MINUTES:-5}
+      DEINTERLACE: ${DEINTERLACE:-true}
     devices:
       - /dev/dri:/dev/dri
     volumes:
@@ -82,6 +83,7 @@ umask 077
   printf 'GPU_RENDER_DEVICE=%s\n' "$INTEL_RENDER_DEVICE"
   printf 'PRE_PADDING_MINUTES=2\n'
   printf 'POST_PADDING_MINUTES=5\n'
+  printf 'DEINTERLACE=true\n'
 } > "$INSTALL_DIR/.env"
 
 say "Pulling ${IMAGE_REF}…"

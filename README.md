@@ -1,8 +1,8 @@
 # CatchUp DVR
 
-CatchUp DVR is a subscription-free, self-hosted DVR for an HDHomeRun. The first implementation slice imports a two-day XMLTV guide, exposes a responsive grid, creates persistent recording jobs with conflict detection, and builds the FFmpeg command used to create chase-playable HLS EVENT recordings.
+CatchUp DVR is a subscription-free, self-hosted DVR for an HDHomeRun. It imports a two-day XMLTV guide, exposes a responsive grid, and records programs as chase-playable HLS EVENT streams.
 
-## What works in this slice
+## What works
 
 - SQLite-backed channels, programs, and recording jobs
 - HDHomeRun guide download with a fresh `DeviceAuth` lookup on every refresh, gzip support, and last-good cache fallback
@@ -11,9 +11,11 @@ CatchUp DVR is a subscription-free, self-hosted DVR for an HDHomeRun. The first 
 - One-click recording with pre/post padding and two-tuner conflict detection
 - HLS playback controls for start-over, pause, -10, +30, +60, and Go Live
 - Intel VA-API render-device detection and deterministic FFmpeg HLS EVENT command construction
+- Supervised FFmpeg recording with live status, graceful playlist finalization, and restart recovery
+- Watch-from-start playback while a recording is still in progress
 - Podman deployment definition with host networking and `/dev/dri` passthrough
 
-The scheduler process and real FFmpeg lifecycle are the next slice. This repository does not claim hardware validation from the development Mac; see [Real-server validation](docs/REAL_SERVER_VALIDATION.md).
+Real tuner, GPU, and long-running chase-play validation must be performed on the Linux server; see [Real-server validation](docs/REAL_SERVER_VALIDATION.md).
 
 ## Local development
 

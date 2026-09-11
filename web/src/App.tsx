@@ -45,6 +45,21 @@ export default function App() {
 
   useEffect(() => { void load() }, [load])
   useEffect(() => {
+    if (view !== 'recordings') return
+    let active = true
+    const refresh = async () => {
+      try {
+        const next = await getRecordings()
+        if (active) setRecordings(next)
+      } catch (error) {
+        if (active) setToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not refresh recordings' })
+      }
+    }
+    void refresh()
+    const timer = window.setInterval(() => void refresh(), 4000)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [view])
+  useEffect(() => {
     if (!toast) return
     const timer = window.setTimeout(() => setToast(null), 4500)
     return () => window.clearTimeout(timer)
@@ -137,7 +152,7 @@ export default function App() {
             {recordings.length ? <div className="recording-list">{recordings.map((recording) => (
               <article key={recording.id} className="recording-card">
                 <div className={`status-art ${recording.status}`}><span>{recording.status === 'recording' ? 'REC' : recording.channelNumber}</span></div>
-                <div className="recording-info"><span className="status-label">{recording.status}</span><h2>{recording.title}</h2><p>{when(recording.programStart, recording.programEnd)} · Channel {recording.channelNumber}</p></div>
+                <div className="recording-info"><span className="status-label">{recording.status}</span><h2>{recording.title}</h2><p>{when(recording.programStart, recording.programEnd)} · Channel {recording.channelNumber}</p>{recording.errorMessage && <p className="recording-error">{recording.errorMessage}</p>}</div>
                 <div className="recording-actions">
                   {recording.playlistPath && <button className="primary" onClick={() => setPlaying(recording)}>{recording.status === 'recording' ? 'Watch from start' : 'Play'}</button>}
                   <button className="subtle danger" onClick={() => void deleteJob(recording)}>Delete</button>

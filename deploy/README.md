@@ -3,7 +3,7 @@
 Once the image is published, installation needs only the HDHomeRun IP address. This one command downloads the installer and starts CatchUp DVR:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Hewbacca/CatchupDVR/main/deploy/install.sh | bash -s -- 192.168.1.50
+curl -fsSL https://raw.githubusercontent.com/Hewbacca/CatchupDVR/main/deploy/install.sh | bash -s -- 192.168.0.103
 ```
 
 The installer verifies Podman Compose, checks the tuner, selects the Intel `/dev/dri/renderD*` device, creates private configuration, pulls the image, starts the container, and waits for a successful health check.
@@ -13,7 +13,7 @@ The first GHCR publish is private by default. In GitHub, open the new `catchupdv
 By default it stores everything under `./catchup-dvr`. To put recordings on a large disk:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Hewbacca/CatchupDVR/main/deploy/install.sh | bash -s -- 192.168.1.50 /mnt/dvr-recordings
+curl -fsSL https://raw.githubusercontent.com/Hewbacca/CatchupDVR/main/deploy/install.sh | bash -s -- 192.168.0.103 /mnt/dvr-recordings
 ```
 
 Open `http://LINUX_SERVER_IP:8095` from the iPad or Android phone. Install it from the browser's Share/Add to Home Screen menu.

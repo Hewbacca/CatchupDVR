@@ -2,10 +2,15 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/Hewbacca/CatchupDVR/backend/internal/model"
+	_ "modernc.org/sqlite"
 )
 
 func TestScheduleHonorsTwoTunerLimitWithPadding(t *testing.T) {
@@ -38,4 +43,110 @@ func TestScheduleHonorsTwoTunerLimitWithPadding(t *testing.T) {
 	if _, err = database.Schedule(context.Background(), ids["Classic Movie"], 2, 5, 2); !errors.Is(err, ErrTunerConflict) {
 		t.Fatalf("got %v, want tuner conflict", err)
 	}
+}
+
+func TestClaimDueRecordingAndFinish(t *testing.T) {
+	database, recording := scheduledFixture(t)
+	defer database.Close()
+	now := recording.ScheduledStart.Add(time.Minute)
+
+	claimed, err := database.ClaimDueRecording(context.Background(), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed == nil || claimed.ID != recording.ID || claimed.Status != "recording" {
+		t.Fatalf("unexpected claimed recording: %#v", claimed)
+	}
+	if err := database.SetRecordingProcess(context.Background(), claimed.ID, "1/index.m3u8", 1234, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.TouchRecording(context.Background(), claimed.ID, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.FinishRecording(context.Background(), claimed.ID, "completed", "", now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	all, err := database.Recordings(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 || all[0].Status != "completed" || all[0].PlaylistPath != "1/index.m3u8" || all[0].ProcessID != 0 || all[0].FinishedAt == nil {
+		t.Fatalf("unexpected completed recording: %#v", all)
+	}
+}
+
+func TestClaimMarksElapsedRecordingFailed(t *testing.T) {
+	database, recording := scheduledFixture(t)
+	defer database.Close()
+
+	claimed, err := database.ClaimDueRecording(context.Background(), recording.ScheduledEnd.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed != nil {
+		t.Fatalf("expected no claim, got %#v", claimed)
+	}
+	all, err := database.Recordings(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if all[0].Status != "failed" || all[0].ErrorMessage == "" {
+		t.Fatalf("unexpected elapsed recording: %#v", all[0])
+	}
+}
+
+func TestOpenMigratesExistingRecordingTable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`CREATE TABLE recordings (
+id INTEGER PRIMARY KEY AUTOINCREMENT, program_id TEXT NOT NULL, channel_id TEXT NOT NULL,
+channel_number TEXT NOT NULL, title TEXT NOT NULL, program_start_unix INTEGER NOT NULL,
+program_end_unix INTEGER NOT NULL, scheduled_start_unix INTEGER NOT NULL,
+scheduled_end_unix INTEGER NOT NULL, status TEXT NOT NULL, playlist_path TEXT NOT NULL DEFAULT '',
+created_at_unix INTEGER NOT NULL)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	upgraded, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer upgraded.Close()
+	if _, err := upgraded.Recordings(context.Background()); err != nil {
+		t.Fatalf("read upgraded schema: %v", err)
+	}
+}
+
+func scheduledFixture(t *testing.T) (*Store, model.Recording) {
+	t.Helper()
+	database, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	xmlData, err := os.ReadFile("../../testdata/guide.xml")
+	if err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if _, _, err := database.ReplaceGuide(context.Background(), xmlData); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	guide, err := database.Guide(context.Background(), time.Date(2026, 9, 10, 14, 0, 0, 0, time.UTC), time.Date(2026, 9, 10, 19, 0, 0, 0, time.UTC))
+	if err != nil || len(guide.Programs) == 0 {
+		database.Close()
+		t.Fatalf("load fixture guide: %v", err)
+	}
+	recording, err := database.Schedule(context.Background(), guide.Programs[0].ID, 0, 0, 2)
+	if err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	return database, recording
 }

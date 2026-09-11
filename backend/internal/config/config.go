@@ -18,6 +18,7 @@ type Config struct {
 	GPURenderDevice string
 	PrePadding      int
 	PostPadding     int
+	Deinterlace     bool
 }
 
 func FromEnv() Config {
@@ -34,7 +35,20 @@ func FromEnv() Config {
 		GPURenderDevice: os.Getenv("GPU_RENDER_DEVICE"),
 		PrePadding:      envInt("PRE_PADDING_MINUTES", 2),
 		PostPadding:     envInt("POST_PADDING_MINUTES", 5),
+		Deinterlace:     envBool("DEINTERLACE", true),
 	}
+}
+
+func envBool(key string, fallback bool) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func env(key, fallback string) string {

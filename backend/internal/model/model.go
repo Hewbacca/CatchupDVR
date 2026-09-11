@@ -28,16 +28,21 @@ type Guide struct {
 }
 
 type Recording struct {
-	ID             int64     `json:"id"`
-	ProgramID      string    `json:"programId"`
-	ChannelID      string    `json:"channelId"`
-	ChannelNumber  string    `json:"channelNumber"`
-	Title          string    `json:"title"`
-	ProgramStart   time.Time `json:"programStart"`
-	ProgramEnd     time.Time `json:"programEnd"`
-	ScheduledStart time.Time `json:"scheduledStart"`
-	ScheduledEnd   time.Time `json:"scheduledEnd"`
-	Status         string    `json:"status"`
-	PlaylistPath   string    `json:"playlistPath,omitempty"`
-	CreatedAt      time.Time `json:"createdAt"`
+	ID             int64      `json:"id"`
+	ProgramID      string     `json:"programId"`
+	ChannelID      string     `json:"channelId"`
+	ChannelNumber  string     `json:"channelNumber"`
+	Title          string     `json:"title"`
+	ProgramStart   time.Time  `json:"programStart"`
+	ProgramEnd     time.Time  `json:"programEnd"`
+	ScheduledStart time.Time  `json:"scheduledStart"`
+	ScheduledEnd   time.Time  `json:"scheduledEnd"`
+	Status         string     `json:"status"`
+	PlaylistPath   string     `json:"playlistPath,omitempty"`
+	ProcessID      int        `json:"processId,omitempty"`
+	StartedAt      *time.Time `json:"startedAt,omitempty"`
+	FinishedAt     *time.Time `json:"finishedAt,omitempty"`
+	HeartbeatAt    *time.Time `json:"heartbeatAt,omitempty"`
+	ErrorMessage   string     `json:"errorMessage,omitempty"`
+	CreatedAt      time.Time  `json:"createdAt"`
 }
