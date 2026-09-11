@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -47,7 +48,7 @@ func New(cfg config.Config, store Store, refresh guide.RefreshService, logger *s
 	mux.HandleFunc("GET /api/recordings", server.getRecordings)
 	mux.HandleFunc("POST /api/recordings", server.createRecording)
 	mux.HandleFunc("DELETE /api/recordings/{id}", server.deleteRecording)
-	mux.Handle("/recordings/", http.StripPrefix("/recordings/", noCacheHLS(http.FileServer(http.Dir(cfg.RecordingsDir)))))
+	mux.Handle("/recordings/", http.StripPrefix("/recordings/", recordingsHandler(cfg.RecordingsDir)))
 	if info, err := os.Stat(cfg.WebDir); err == nil && info.IsDir() {
 		mux.Handle("/", spaHandler(cfg.WebDir))
 	}
@@ -201,6 +202,53 @@ func noCacheHLS(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func recordingsHandler(root string) http.Handler {
+	files := noCacheHLS(http.FileServer(http.Dir(root)))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, ".m3u8") {
+			files.ServeHTTP(w, r)
+			return
+		}
+		clean := strings.TrimPrefix(filepath.Clean("/"+r.URL.Path), "/")
+		if clean == "." || strings.HasPrefix(clean, "..") {
+			http.NotFound(w, r)
+			return
+		}
+		path := filepath.Join(root, clean)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		data = playlistWithStartHint(data)
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+		http.ServeContent(w, r, filepath.Base(path), info.ModTime(), bytes.NewReader(data))
+	})
+}
+
+func playlistWithStartHint(data []byte) []byte {
+	const hint = "#EXT-X-START:TIME-OFFSET=0,PRECISE=YES"
+	if bytes.Contains(data, []byte("#EXT-X-START:")) {
+		return data
+	}
+	lineEnd := bytes.IndexByte(data, '\n')
+	if lineEnd < 0 || !bytes.Equal(bytes.TrimSpace(data[:lineEnd]), []byte("#EXTM3U")) {
+		return data
+	}
+	result := make([]byte, 0, len(data)+len(hint)+1)
+	result = append(result, data[:lineEnd+1]...)
+	result = append(result, hint...)
+	result = append(result, '\n')
+	result = append(result, data[lineEnd+1:]...)
+	return result
 }
 
 func spaHandler(root string) http.Handler {
