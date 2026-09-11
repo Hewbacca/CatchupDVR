@@ -10,6 +10,9 @@ type Props = {
   scheduled: Set<string>
   favorites: Set<string>
   selected: Program | null
+  searchResultIDs: Set<string>
+  activeSearchResultID: string | null
+  searchText: string
   onSelect: (program: Program) => void
   onToggleFavorite: (channelID: string) => void
 }
@@ -17,7 +20,14 @@ type Props = {
 function minutesBetween(a: Date, b: Date) { return (a.getTime() - b.getTime()) / 60000 }
 function formatTime(date: Date) { return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(date) }
 
-export function GuideGrid({ channels, programs, from, to, scheduled, favorites, selected, onSelect, onToggleFavorite }: Props) {
+function highlightText(text: string, query: string) {
+  const needle = query.trim()
+  if (!needle) return text
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return text.split(new RegExp(`(${escaped})`, 'ig')).map((part, index) => part.toLowerCase() === needle.toLowerCase() ? <mark key={index}>{part}</mark> : part)
+}
+
+export function GuideGrid({ channels, programs, from, to, scheduled, favorites, selected, searchResultIDs, activeSearchResultID, searchText, onSelect, onToggleFavorite }: Props) {
   const totalMinutes = minutesBetween(to, from)
   const ticks = Array.from({ length: Math.ceil(totalMinutes / 30) + 1 }, (_, index) => new Date(from.getTime() + index * 30 * 60000))
   const nowOffset = minutesBetween(new Date(), from) * MINUTE_WIDTH
@@ -46,15 +56,16 @@ export function GuideGrid({ channels, programs, from, to, scheduled, favorites, 
                   const visibleStart = Math.max(new Date(program.start).getTime(), from.getTime())
                   const visibleEnd = Math.min(new Date(program.end).getTime(), to.getTime())
                   const width = Math.max(44, ((visibleEnd - visibleStart) / 60000) * MINUTE_WIDTH - 4)
+                  const isSearchResult = searchResultIDs.has(program.id)
                   return (
                     <button
-                      className={`program ${scheduled.has(program.id) ? 'scheduled' : ''} ${selected?.id === program.id ? 'selected' : ''}`}
+                      className={`program ${scheduled.has(program.id) ? 'scheduled' : ''} ${selected?.id === program.id ? 'selected' : ''} ${isSearchResult ? 'search-match' : ''} ${activeSearchResultID === program.id ? 'active-search-match' : ''}`}
                       key={program.id}
                       style={{ left: ((visibleStart - from.getTime()) / 60000) * MINUTE_WIDTH + 2, width }}
                       onClick={() => onSelect(program)}
                     >
-                      <strong>{program.title}</strong>
-                      <span>{formatTime(new Date(program.start))}{program.subtitle ? ` · ${program.subtitle}` : ''}</span>
+                      <strong>{isSearchResult ? highlightText(program.title, searchText) : program.title}</strong>
+                      <span>{formatTime(new Date(program.start))}{program.subtitle && <> · {isSearchResult ? highlightText(program.subtitle, searchText) : program.subtitle}</>}</span>
                       {scheduled.has(program.id) && <b className="recording-dot" aria-label="Scheduled to record" />}
                     </button>
                   )
