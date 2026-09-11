@@ -16,7 +16,10 @@ import (
 	"github.com/Hewbacca/CatchupDVR/backend/internal/model"
 )
 
-var ErrTunerConflict = errors.New("all tuners are reserved for this time")
+var (
+	ErrTunerConflict            = errors.New("all tuners are reserved for this time")
+	ErrAuthenticationConfigured = errors.New("an account has already been configured")
+)
 
 type Store struct {
 	db *sql.DB
@@ -84,6 +87,13 @@ CREATE TABLE IF NOT EXISTS recordings (
 );
 CREATE INDEX IF NOT EXISTS recordings_allocation ON recordings(status, scheduled_start_unix, scheduled_end_unix);
 CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS authentication (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  username TEXT NOT NULL,
+  password_hash TEXT NOT NULL,
+  session_secret BLOB NOT NULL,
+  created_at_unix INTEGER NOT NULL
+);
 `)
 	if err != nil {
 		return err
@@ -455,6 +465,40 @@ func (s *Store) DeleteRecording(ctx context.Context, id int64) error {
 	affected, _ := result.RowsAffected()
 	if affected == 0 {
 		return fmt.Errorf("recording not found or still active")
+	}
+	return nil
+}
+
+func (s *Store) AuthCredentials(ctx context.Context) (model.AuthCredentials, bool, error) {
+	var credentials model.AuthCredentials
+	var createdAt int64
+	err := s.db.QueryRowContext(ctx, `SELECT username, password_hash, session_secret, created_at_unix FROM authentication WHERE id=1`).
+		Scan(&credentials.Username, &credentials.PasswordHash, &credentials.SessionSecret, &createdAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.AuthCredentials{}, false, nil
+	}
+	if err != nil {
+		return model.AuthCredentials{}, false, err
+	}
+	credentials.CreatedAt = time.Unix(createdAt, 0).UTC()
+	return credentials, true, nil
+}
+
+// CreateAuthCredentials is deliberately a one-time operation. Reconfiguration
+// happens through a future explicit account-reset flow, never by overwriting an
+// account just because a container was restarted.
+func (s *Store) CreateAuthCredentials(ctx context.Context, credentials model.AuthCredentials) error {
+	result, err := s.db.ExecContext(ctx, `INSERT INTO authentication(id, username, password_hash, session_secret, created_at_unix)
+VALUES(1, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`, credentials.Username, credentials.PasswordHash, credentials.SessionSecret, credentials.CreatedAt.Unix())
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrAuthenticationConfigured
 	}
 	return nil
 }

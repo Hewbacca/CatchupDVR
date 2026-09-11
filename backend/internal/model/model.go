@@ -2,6 +2,15 @@ package model
 
 import "time"
 
+// AuthCredentials are kept only in the local CatchUp database. PasswordHash is
+// a bcrypt hash; SessionSecret signs browser sessions and is never sent out.
+type AuthCredentials struct {
+	Username      string
+	PasswordHash  string
+	SessionSecret []byte
+	CreatedAt     time.Time
+}
+
 type Channel struct {
 	ID     string `json:"id"`
 	Number string `json:"number"`

@@ -26,6 +26,8 @@ type Store interface {
 	Guide(context.Context, time.Time, time.Time) (model.Guide, error)
 	Schedule(context.Context, string, int, int, int) (model.Recording, error)
 	Recordings(context.Context) ([]model.Recording, error)
+	AuthCredentials(context.Context) (model.AuthCredentials, bool, error)
+	CreateAuthCredentials(context.Context, model.AuthCredentials) error
 	Ping(context.Context) error
 }
 
@@ -50,11 +52,16 @@ type Server struct {
 	recorder RecordingController
 	live     LiveController
 	tuners   TunerCounter
+	auth     *authService
 }
 
 func New(cfg config.Config, store Store, refresh guide.RefreshService, recorder RecordingController, live LiveController, tuners TunerCounter, logger *slog.Logger) http.Handler {
-	server := &Server{config: cfg, store: store, refresh: refresh, recorder: recorder, live: live, tuners: tuners, logger: logger}
+	server := &Server{config: cfg, store: store, refresh: refresh, recorder: recorder, live: live, tuners: tuners, logger: logger, auth: newAuthService(store)}
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/auth/status", server.authStatus)
+	mux.HandleFunc("POST /api/auth/setup", server.setupAccount)
+	mux.HandleFunc("POST /api/auth/login", server.login)
+	mux.HandleFunc("POST /api/auth/logout", server.logout)
 	mux.HandleFunc("GET /api/health", server.health)
 	mux.HandleFunc("GET /api/diagnostics", server.diagnostics)
 	mux.HandleFunc("GET /api/guide", server.getGuide)
@@ -68,7 +75,7 @@ func New(cfg config.Config, store Store, refresh guide.RefreshService, recorder 
 	if info, err := os.Stat(cfg.WebDir); err == nil && info.IsDir() {
 		mux.Handle("/", spaHandler(cfg.WebDir))
 	}
-	return logging(logger, mux)
+	return logging(logger, server.authentication(mux))
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {

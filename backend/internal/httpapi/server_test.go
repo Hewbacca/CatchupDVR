@@ -15,18 +15,32 @@ import (
 	"github.com/Hewbacca/CatchupDVR/backend/internal/guide"
 	"github.com/Hewbacca/CatchupDVR/backend/internal/model"
 	"github.com/Hewbacca/CatchupDVR/backend/internal/recording"
+	storage "github.com/Hewbacca/CatchupDVR/backend/internal/store"
 )
 
-type testStore struct{}
+type testStore struct{ credentials *model.AuthCredentials }
 
-func (testStore) Guide(context.Context, time.Time, time.Time) (model.Guide, error) {
+func (*testStore) Guide(context.Context, time.Time, time.Time) (model.Guide, error) {
 	return model.Guide{}, nil
 }
-func (testStore) Schedule(context.Context, string, int, int, int) (model.Recording, error) {
+func (*testStore) Schedule(context.Context, string, int, int, int) (model.Recording, error) {
 	return model.Recording{}, nil
 }
-func (testStore) Recordings(context.Context) ([]model.Recording, error) { return nil, nil }
-func (testStore) Ping(context.Context) error                            { return nil }
+func (*testStore) Recordings(context.Context) ([]model.Recording, error) { return nil, nil }
+func (*testStore) Ping(context.Context) error                            { return nil }
+func (s *testStore) AuthCredentials(context.Context) (model.AuthCredentials, bool, error) {
+	if s.credentials == nil {
+		return model.AuthCredentials{}, false, nil
+	}
+	return *s.credentials, true, nil
+}
+func (s *testStore) CreateAuthCredentials(_ context.Context, credentials model.AuthCredentials) error {
+	if s.credentials != nil {
+		return storage.ErrAuthenticationConfigured
+	}
+	s.credentials = &credentials
+	return nil
+}
 
 type testRecorder struct{}
 
@@ -53,14 +67,32 @@ func (l *testLive) Stop(_ context.Context, id string) error {
 func testHandler(t *testing.T, live LiveController, tuners TunerCounter) http.Handler {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return New(config.Config{RecordingsDir: t.TempDir(), TunerCount: 2}, testStore{}, guide.RefreshService{}, testRecorder{}, live, tuners, logger)
+	return New(config.Config{RecordingsDir: t.TempDir(), TunerCount: 2}, &testStore{}, guide.RefreshService{}, testRecorder{}, live, tuners, logger)
+}
+
+func setupCookie(t *testing.T, handler http.Handler) *http.Cookie {
+	t.Helper()
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewBufferString(`{"username":"tester","password":"test-password-123"}`))
+	request.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("setup failed: status=%d body=%s", response.Code, response.Body.String())
+	}
+	cookies := response.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("expected one session cookie, got %d", len(cookies))
+	}
+	return cookies[0]
 }
 
 func TestDiagnosticsReportsCurrentTunerAvailability(t *testing.T) {
 	live := &testLive{}
 	handler := testHandler(t, live, testTuners{used: 1, total: 2})
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/diagnostics", nil))
+	request := httptest.NewRequest(http.MethodGet, "/api/diagnostics", nil)
+	request.AddCookie(setupCookie(t, handler))
+	handler.ServeHTTP(response, request)
 	var body struct {
 		TunerCount      int `json:"tunerCount"`
 		TunersInUse     int `json:"tunersInUse"`
@@ -80,6 +112,8 @@ func TestLiveSessionLifecycleRoutes(t *testing.T) {
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/api/live", bytes.NewBufferString(`{"channelNumber":"7.1","title":"Live News"}`))
 	request.Header.Set("Content-Type", "application/json")
+	cookie := setupCookie(t, handler)
+	request.AddCookie(cookie)
 	handler.ServeHTTP(response, request)
 	var session recording.LiveSession
 	if err := json.NewDecoder(response.Body).Decode(&session); err != nil {
@@ -89,8 +123,59 @@ func TestLiveSessionLifecycleRoutes(t *testing.T) {
 		t.Fatalf("unexpected live start: status=%d channel=%q session=%+v", response.Code, live.startedChannel, session)
 	}
 	response = httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodDelete, "/api/live/live-1", nil))
+	stopRequest := httptest.NewRequest(http.MethodDelete, "/api/live/live-1", nil)
+	stopRequest.AddCookie(cookie)
+	handler.ServeHTTP(response, stopRequest)
 	if response.Code != http.StatusNoContent || live.stoppedID != "live-1" {
 		t.Fatalf("unexpected live stop: status=%d id=%q", response.Code, live.stoppedID)
+	}
+}
+
+func TestAccountSetupLoginAndAPIProtection(t *testing.T) {
+	handler := testHandler(t, &testLive{}, testTuners{total: 2})
+
+	status := httptest.NewRecorder()
+	handler.ServeHTTP(status, httptest.NewRequest(http.MethodGet, "/api/auth/status", nil))
+	if status.Code != http.StatusOK || !bytes.Contains(status.Body.Bytes(), []byte(`"setupRequired":true`)) {
+		t.Fatalf("unexpected setup status: %d %s", status.Code, status.Body.String())
+	}
+
+	protected := httptest.NewRecorder()
+	handler.ServeHTTP(protected, httptest.NewRequest(http.MethodGet, "/api/diagnostics", nil))
+	if protected.Code != http.StatusUnauthorized {
+		t.Fatalf("expected protected API to reject anonymous request, got %d", protected.Code)
+	}
+
+	cookie := setupCookie(t, handler)
+	allowed := httptest.NewRecorder()
+	allowedRequest := httptest.NewRequest(http.MethodGet, "/api/diagnostics", nil)
+	allowedRequest.AddCookie(cookie)
+	handler.ServeHTTP(allowed, allowedRequest)
+	if allowed.Code != http.StatusOK {
+		t.Fatalf("expected authenticated API access, got %d", allowed.Code)
+	}
+
+	logout := httptest.NewRecorder()
+	logoutRequest := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	logoutRequest.AddCookie(cookie)
+	handler.ServeHTTP(logout, logoutRequest)
+	if logout.Code != http.StatusNoContent {
+		t.Fatalf("unexpected logout status: %d", logout.Code)
+	}
+
+	badLogin := httptest.NewRecorder()
+	badLoginRequest := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString(`{"username":"tester","password":"wrong-password"}`))
+	badLoginRequest.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(badLogin, badLoginRequest)
+	if badLogin.Code != http.StatusUnauthorized {
+		t.Fatalf("expected bad login rejection, got %d", badLogin.Code)
+	}
+
+	login := httptest.NewRecorder()
+	loginRequest := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString(`{"username":"tester","password":"test-password-123"}`))
+	loginRequest.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(login, loginRequest)
+	if login.Code != http.StatusOK || len(login.Result().Cookies()) != 1 {
+		t.Fatalf("expected successful login, got %d %s", login.Code, login.Body.String())
 	}
 }

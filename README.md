@@ -11,6 +11,7 @@ CatchUp DVR is a subscription-free, self-hosted DVR for an HDHomeRun. It imports
 - One-click recording with pre/post padding and two-tuner conflict detection
 - HLS playback controls for start-over, pause, -10, +30, +60, and Go Live
 - Per-browser resume positions for recordings that have been watched
+- First-run account setup with locally stored bcrypt password hashes and signed browser sessions
 - Rewindable live TV from the guide, backed by temporary buffers that are removed when the player closes
 - Live tuner availability with scheduled recordings taking priority over temporary live-TV sessions
 - Intel VA-API render-device detection and deterministic FFmpeg HLS EVENT command construction

@@ -54,4 +54,4 @@ After each successful HDHomeRun refresh, the next refresh is randomly scheduled 
 
 ## Security and network assumptions
 
-The initial deployment is trusted-LAN only. Podman uses host networking so HDHomeRun discovery and direct streams work reliably. Before remote access, add a TLS reverse proxy and authentication; do not expose the service directly to the internet.
+Podman uses host networking so HDHomeRun discovery and direct streams work reliably. CatchUp prompts for one local account at first startup, stores only a bcrypt password hash in SQLite, and signs browser sessions with a database-held secret. For remote access, still place it behind a TLS reverse proxy; do not expose the service directly to the internet.

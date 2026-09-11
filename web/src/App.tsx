@@ -1,7 +1,9 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
-import { getDiagnostics, getGuide, getRecordings, removeRecording, schedule, startLive, stopLive } from './api'
+import { getAuthStatus, getDiagnostics, getGuide, getRecordings, logout, removeRecording, schedule, startLive, stopLive } from './api'
+import { AuthScreen } from './AuthScreen'
 import { GuideGrid } from './GuideGrid'
 import { readResumePositions, writeResumePositions } from './resume'
+import type { AuthStatus } from './api'
 import type { Diagnostics, Guide, Program, Recording } from './types'
 
 type View = 'guide' | 'recordings'
@@ -9,7 +11,7 @@ type Toast = { tone: 'success' | 'error'; message: string }
 type Playback = { src: string; title: string; startAt: number; recordingId?: number; liveSessionId?: string }
 
 const HlsPlayer = lazy(() => import('./HlsPlayer').then((module) => ({ default: module.HlsPlayer })))
-const APP_VERSION = '1.12'
+const APP_VERSION = '1.13'
 
 function floorHalfHour(date: Date) {
   const result = new Date(date)
@@ -42,6 +44,17 @@ export default function App() {
   const [deleting, setDeleting] = useState<Set<number>>(() => new Set())
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState<Toast | null>(null)
+  const [auth, setAuth] = useState<AuthStatus | null>(null)
+  const [authError, setAuthError] = useState('')
+
+  const loadAuth = useCallback(async () => {
+    try {
+      setAuthError('')
+      setAuth(await getAuthStatus())
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Could not reach CatchUp')
+    }
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -53,8 +66,10 @@ export default function App() {
     } finally { setLoading(false) }
   }, [from, to])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => { void loadAuth() }, [loadAuth])
+  useEffect(() => { if (auth?.authenticated) void load() }, [auth?.authenticated, load])
   useEffect(() => {
+    if (!auth?.authenticated) return
     let active = true
     const refresh = async () => {
       try {
@@ -66,9 +81,9 @@ export default function App() {
     }
     const timer = window.setInterval(() => void refresh(), 5000)
     return () => { active = false; window.clearInterval(timer) }
-  }, [])
+  }, [auth?.authenticated])
   useEffect(() => {
-    if (view !== 'recordings') return
+    if (!auth?.authenticated || view !== 'recordings') return
     let active = true
     const refresh = async () => {
       try {
@@ -81,7 +96,7 @@ export default function App() {
     void refresh()
     const timer = window.setInterval(() => void refresh(), 4000)
     return () => { active = false; window.clearInterval(timer) }
-  }, [view])
+  }, [auth?.authenticated, view])
   useEffect(() => {
     if (!toast) return
     const timer = window.setTimeout(() => setToast(null), 4500)
@@ -150,7 +165,7 @@ export default function App() {
 
   useEffect(() => {
     const context = document.modelContext
-    if (!context?.registerTool || !guide) return
+    if (!auth?.authenticated || !context?.registerTool || !guide) return
     const lifecycle = new AbortController()
     const registration = context.registerTool({
       name: 'create_recording',
@@ -175,7 +190,7 @@ export default function App() {
     }, { signal: lifecycle.signal })
     void Promise.resolve(registration).catch(() => undefined)
     return () => lifecycle.abort()
-  }, [guide, record, scheduled])
+  }, [auth?.authenticated, guide, record, scheduled])
 
   async function deleteJob(recording: Recording) {
     setDeleting((current) => new Set(current).add(recording.id))
@@ -209,6 +224,22 @@ export default function App() {
   const tunersAvailable = diagnostics?.tunersAvailable ?? Math.max(0, tunerCount - tunersInUse)
   const selectedIsAiringNow = selected ? isAiringNow(selected) : false
 
+  async function signOut() {
+    const liveSessionID = playing?.liveSessionId
+    if (liveSessionID) {
+      try { await stopLive(liveSessionID) } catch { /* Session cleanup will be retried by the server on shutdown. */ }
+    }
+    try {
+      await logout()
+      setPlaying(null); setSelected(null); setGuide(null); setRecordings([]); setDiagnostics(null); setAuth({ setupRequired: false, authenticated: false })
+    } catch (error) {
+      setToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not sign out' })
+    }
+  }
+
+  if (!auth) return <main className="auth-page"><section className="auth-card auth-loading"><img src="/icon.svg" alt="" className="auth-icon" /><h1>Connecting to CatchUp…</h1>{authError && <><p className="auth-error">{authError}</p><button className="subtle" onClick={() => void loadAuth()}>Try again</button></>}</section><footer className="app-version">CatchUp DVR v{APP_VERSION}</footer></main>
+  if (!auth.authenticated) return <><AuthScreen setupRequired={auth.setupRequired} onAuthenticated={() => setAuth({ setupRequired: false, authenticated: true })} /><footer className="app-version">CatchUp DVR v{APP_VERSION}</footer></>
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -221,6 +252,7 @@ export default function App() {
           <span className="tuner-lights" aria-hidden="true">{Array.from({ length: tunerCount }, (_, index) => <i key={index} className={index < tunersInUse ? 'busy' : 'online'} />)}</span>
           {diagnostics ? `${tunersAvailable} of ${tunerCount} free` : 'Offline'}
         </div>
+        <button className="sign-out" onClick={() => void signOut()}>Sign out</button>
       </header>
 
       <main>

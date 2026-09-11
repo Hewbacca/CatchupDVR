@@ -2,7 +2,10 @@ module github.com/Hewbacca/CatchupDVR/backend
 
 go 1.24
 
-require modernc.org/sqlite v1.36.3
+require (
+	golang.org/x/crypto v0.31.0
+	modernc.org/sqlite v1.36.3
+)
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect

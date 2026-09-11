@@ -143,6 +143,28 @@ created_at_unix INTEGER NOT NULL)`)
 	}
 }
 
+func TestAuthenticationCredentialsPersistAndCannotBeOverwritten(t *testing.T) {
+	database, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	credentials := model.AuthCredentials{Username: "alex", PasswordHash: "bcrypt-hash", SessionSecret: []byte("session-secret"), CreatedAt: time.Date(2026, 9, 10, 18, 0, 0, 0, time.UTC)}
+	if err := database.CreateAuthCredentials(context.Background(), credentials); err != nil {
+		t.Fatal(err)
+	}
+	stored, configured, err := database.AuthCredentials(context.Background())
+	if err != nil || !configured {
+		t.Fatalf("expected configured account, got configured=%t err=%v", configured, err)
+	}
+	if stored.Username != credentials.Username || stored.PasswordHash != credentials.PasswordHash || string(stored.SessionSecret) != string(credentials.SessionSecret) || !stored.CreatedAt.Equal(credentials.CreatedAt) {
+		t.Fatalf("credentials did not round-trip: %#v", stored)
+	}
+	if err := database.CreateAuthCredentials(context.Background(), credentials); !errors.Is(err, ErrAuthenticationConfigured) {
+		t.Fatalf("expected one-time setup protection, got %v", err)
+	}
+}
+
 func TestGuideRefreshCorrectsChannelNumberForScheduledJobs(t *testing.T) {
 	database, err := Open(":memory:")
 	if err != nil {

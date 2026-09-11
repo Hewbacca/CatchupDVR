@@ -1,10 +1,31 @@
 import type { Diagnostics, Guide, LiveSession, Recording } from './types'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, init)
+  const response = await fetch(path, { credentials: 'same-origin', ...init })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`)
   return body as T
+}
+
+export type AuthStatus = { setupRequired: boolean; authenticated: boolean }
+
+export function getAuthStatus() { return request<AuthStatus>('/api/auth/status') }
+
+export function setupAccount(username: string, password: string) {
+  return request<{ authenticated: boolean }>('/api/auth/setup', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }),
+  })
+}
+
+export function login(username: string, password: string) {
+  return request<{ authenticated: boolean }>('/api/auth/login', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }),
+  })
+}
+
+export async function logout() {
+  const response = await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' })
+  if (!response.ok) throw new Error('Could not sign out')
 }
 
 export function getGuide(from: Date, to: Date) {

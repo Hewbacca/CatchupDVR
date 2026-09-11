@@ -16,7 +16,7 @@ By default it stores everything under `./catchup-dvr`. To put recordings on a la
 curl -fsSL https://raw.githubusercontent.com/Hewbacca/CatchupDVR/main/deploy/install.sh | bash -s -- 192.168.0.103 /mnt/dvr-recordings
 ```
 
-Open `http://LINUX_SERVER_IP:8095` from the iPad or Android phone. Install it from the browser's Share/Add to Home Screen menu.
+Open `http://LINUX_SERVER_IP:8095` from the iPad or Android phone. On the first visit, create the one local CatchUp account; its password is stored only as a secure hash in the mounted database. Install it from the browser's Share/Add to Home Screen menu.
 
 If the repository is checked out locally, update later with:
 
@@ -33,4 +33,4 @@ Without a checkout, update with `cd catchup-dvr && podman compose pull && podman
 - `CATCHUP_PORT`: host-network HTTP port. Default: `8095`.
 - `CATCHUP_DATA_DIR`: database and guide-cache directory.
 
-The initial service trusts the home LAN. Do not forward its port from the router or expose it directly to the internet.
+For internet access, keep the service behind a TLS reverse proxy such as Caddy. Do not forward its port from the router or expose it directly to the internet.
