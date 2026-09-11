@@ -18,7 +18,7 @@ const (
 	publicLogosURL      = "https://iptv-org.github.io/api/logos.json"
 	wikipediaSummaryURL = "https://en.wikipedia.org/api/rest_v1/page/summary/"
 	maximumCatalogSize  = 24 << 20
-	logoLookupUserAgent = "CatchUpDVR/1.15 (https://github.com/Hewbacca/CatchupDVR)"
+	logoLookupUserAgent = "CatchUpDVR/1.16 (https://github.com/Hewbacca/CatchupDVR)"
 )
 
 var usCallsign = regexp.MustCompile(`^[KW][A-Z]{2,5}(?:-TV)?$`)
