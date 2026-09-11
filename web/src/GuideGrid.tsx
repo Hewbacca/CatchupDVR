@@ -35,6 +35,7 @@ export function GuideGrid({ channels, programs, from, to, scheduled, favorites, 
           return (
             <div className="channel-row" key={channel.id}>
               <div className="channel-label">
+                {channel.logoUrl && <img className="channel-logo" src={channel.logoUrl} alt={`${channel.name} logo`} onError={(event) => { event.currentTarget.hidden = true }} />}
                 <div className="channel-number"><button className={`favorite-toggle ${favorite ? 'selected' : ''}`} onClick={() => onToggleFavorite(channel.id)} aria-pressed={favorite} aria-label={`${favorite ? 'Remove' : 'Add'} ${channel.number} ${channel.name} ${favorite ? 'from' : 'to'} favorites`}>★</button><strong>{channel.number}</strong></div>
                 <span>{channel.name}</span>
               </div>

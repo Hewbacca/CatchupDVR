@@ -45,6 +45,11 @@ large implementation notes here.
   hostnames, IP addresses, or user-specific paths to committed files.
 - Preferences such as favorite channels belong to the authenticated user on the
   server, not only in browser storage.
+- Station logos are automatic and server-side. Prefer a valid XMLTV channel
+  icon; otherwise use an exact catalog match or an explicit affiliate
+  description for a known broadcast network. Persist the result in
+  `channel_logos` and leave uncertain or unavailable matches blank—do not add
+  a user-facing logo configuration workflow.
 - Live TV creates a temporary rewind buffer. It must not become a library
   recording unless the user explicitly records it, and it must be cleaned up
   when playback ends.

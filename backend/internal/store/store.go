@@ -102,6 +102,12 @@ CREATE TABLE IF NOT EXISTS favorite_channels (
   created_at_unix INTEGER NOT NULL,
   PRIMARY KEY(username, channel_id)
 );
+CREATE TABLE IF NOT EXISTS channel_logos (
+  channel_id TEXT PRIMARY KEY,
+  logo_url TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL DEFAULT 'none',
+  checked_at_unix INTEGER NOT NULL
+);
 `)
 	if err != nil {
 		return err
@@ -153,6 +159,10 @@ func (s *Store) ReplaceGuide(ctx context.Context, xmlData []byte) (int, int, err
 	if err != nil {
 		return 0, 0, err
 	}
+	logoUpdates, err := s.resolveChannelLogos(ctx, channels)
+	if err != nil {
+		return 0, 0, err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, 0, err
@@ -166,6 +176,12 @@ func (s *Store) ReplaceGuide(ctx context.Context, xmlData []byte) (int, int, err
 	}
 	for _, channel := range channels {
 		if _, err = tx.ExecContext(ctx, "INSERT INTO channels(id, number, name) VALUES(?, ?, ?)", channel.ID, channel.Number, channel.Name); err != nil {
+			return 0, 0, err
+		}
+	}
+	for channelID, logo := range logoUpdates {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO channel_logos(channel_id, logo_url, source, checked_at_unix) VALUES(?, ?, ?, ?)
+ON CONFLICT(channel_id) DO UPDATE SET logo_url=excluded.logo_url, source=excluded.source, checked_at_unix=excluded.checked_at_unix`, channelID, logo.URL, logo.Source, logo.CheckedAt.Unix()); err != nil {
 			return 0, 0, err
 		}
 	}
@@ -189,15 +205,91 @@ WHERE status='scheduled' AND EXISTS (SELECT 1 FROM channels WHERE channels.id=re
 	return len(channels), len(programs), nil
 }
 
+const logoRetryInterval = 7 * 24 * time.Hour
+
+type channelLogo struct {
+	URL       string
+	Source    string
+	CheckedAt time.Time
+}
+
+// resolveChannelLogos preserves a station's first successful automatic choice.
+// A missing result is retried only weekly so ordinary guide refreshes do not
+// repeatedly contact the public catalog for a station with no available icon.
+func (s *Store) resolveChannelLogos(ctx context.Context, channels []model.Channel) (map[string]channelLogo, error) {
+	existing, err := s.savedChannelLogos(ctx)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	updates := make(map[string]channelLogo)
+	lookup := make([]model.Channel, 0)
+	for index := range channels {
+		channel := &channels[index]
+		if saved, ok := existing[channel.ID]; ok && guide.IsSafeLogoURL(saved.URL) {
+			channel.LogoURL = saved.URL
+			continue
+		}
+		if guide.IsSafeLogoURL(channel.LogoURL) {
+			channel.LogoURL = strings.TrimSpace(channel.LogoURL)
+			updates[channel.ID] = channelLogo{URL: channel.LogoURL, Source: "xmltv", CheckedAt: now}
+			continue
+		}
+		channel.LogoURL = ""
+		if saved, ok := existing[channel.ID]; ok && now.Sub(saved.CheckedAt) < logoRetryInterval {
+			continue
+		}
+		lookup = append(lookup, *channel)
+	}
+
+	resolved := guide.ResolvePublicChannelLogos(ctx, lookup)
+	for channelID, logoURL := range resolved {
+		updates[channelID] = channelLogo{URL: logoURL, Source: "catalog", CheckedAt: now}
+	}
+	for _, channel := range lookup {
+		if logo, ok := updates[channel.ID]; ok {
+			for index := range channels {
+				if channels[index].ID == channel.ID {
+					channels[index].LogoURL = logo.URL
+					break
+				}
+			}
+			continue
+		}
+		updates[channel.ID] = channelLogo{Source: "none", CheckedAt: now}
+	}
+	return updates, nil
+}
+
+func (s *Store) savedChannelLogos(ctx context.Context) (map[string]channelLogo, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT channel_id, logo_url, source, checked_at_unix FROM channel_logos")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	logos := make(map[string]channelLogo)
+	for rows.Next() {
+		var channelID, logoURL, source string
+		var checkedAt int64
+		if err := rows.Scan(&channelID, &logoURL, &source, &checkedAt); err != nil {
+			return nil, err
+		}
+		logos[channelID] = channelLogo{URL: logoURL, Source: source, CheckedAt: time.Unix(checkedAt, 0).UTC()}
+	}
+	return logos, rows.Err()
+}
+
 func (s *Store) Guide(ctx context.Context, from, to time.Time) (model.Guide, error) {
 	result := model.Guide{From: from, To: to, Channels: []model.Channel{}, Programs: []model.Program{}}
-	rows, err := s.db.QueryContext(ctx, "SELECT id, number, name FROM channels ORDER BY CAST(number AS REAL), number")
+	rows, err := s.db.QueryContext(ctx, `SELECT c.id, c.number, c.name, COALESCE(l.logo_url, '')
+FROM channels c LEFT JOIN channel_logos l ON l.channel_id=c.id
+ORDER BY CAST(c.number AS REAL), c.number`)
 	if err != nil {
 		return result, err
 	}
 	for rows.Next() {
 		var channel model.Channel
-		if err := rows.Scan(&channel.ID, &channel.Number, &channel.Name); err != nil {
+		if err := rows.Scan(&channel.ID, &channel.Number, &channel.Name, &channel.LogoURL); err != nil {
 			rows.Close()
 			return result, err
 		}

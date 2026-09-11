@@ -1,4 +1,4 @@
-export type Channel = { id: string; number: string; name: string }
+export type Channel = { id: string; number: string; name: string; logoUrl?: string }
 
 export type Program = {
   id: string

@@ -64,13 +64,14 @@ h1 { font-size: clamp(1.8rem, 4vw, 2.8rem); line-height: 1; margin: 0; }
 .guide-section-heading { margin-bottom: 13px; }
 .guide-section-heading .eyebrow { margin-bottom: 5px; }
 .guide-section-heading h2 { margin: 0; font-size: 1.35rem; }
-.guide-grid { min-width: calc(116px + var(--timeline-width)); }
-.channel-corner { width: 116px; height: 48px; position: sticky; z-index: 13; left: 0; top: 0; display: flex; align-items: center; padding: 0 14px; background: #0a1727; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--muted); text-transform: uppercase; letter-spacing: .11em; font-size: .68rem; font-weight: 700; }
-.timeline-head { position: sticky; z-index: 12; top: 0; margin-left: 116px; width: var(--timeline-width); height: 48px; margin-top: -48px; background: #0a1727; border-bottom: 1px solid var(--line); }
+.guide-grid { min-width: calc(144px + var(--timeline-width)); }
+.channel-corner { width: 144px; height: 48px; position: sticky; z-index: 13; left: 0; top: 0; display: flex; align-items: center; padding: 0 14px; background: #0a1727; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--muted); text-transform: uppercase; letter-spacing: .11em; font-size: .68rem; font-weight: 700; }
+.timeline-head { position: sticky; z-index: 12; top: 0; margin-left: 144px; width: var(--timeline-width); height: 48px; margin-top: -48px; background: #0a1727; border-bottom: 1px solid var(--line); }
 .timeline-head span { position: absolute; top: 15px; color: #aab5c4; font-size: .78rem; transform: translateX(8px); }
 .channel-row { display: flex; min-height: 86px; border-bottom: 1px solid var(--line); }
 .channel-row:last-child { border-bottom: 0; }
-.channel-label { position: sticky; z-index: 10; left: 0; width: 116px; flex: 0 0 116px; display: flex; flex-direction: column; justify-content: center; padding: 12px 14px; background: #0c1929; border-right: 1px solid var(--line); }
+.channel-label { position: sticky; z-index: 10; left: 0; width: 144px; flex: 0 0 144px; display: flex; flex-direction: column; justify-content: center; padding: 10px 14px; background: #0c1929; border-right: 1px solid var(--line); }
+.channel-logo { display: block; width: 74px; height: 26px; margin-bottom: 5px; object-fit: contain; object-position: left center; }
 .channel-number { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .channel-label strong { font: 700 1.15rem ui-rounded, 'Avenir Next', system-ui, sans-serif; }
 .channel-label span { color: var(--muted); font-size: .74rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 3px; }
@@ -179,9 +180,10 @@ h1 { font-size: clamp(1.8rem, 4vw, 2.8rem); line-height: 1; margin: 0; }
   .guide-controls { justify-content: flex-start; }
   .guide-search { flex: 1 1 100%; }
   .guide-search input { width: 100%; }
-  .channel-corner, .channel-label { width: 92px; flex-basis: 92px; }
-  .timeline-head { margin-left: 92px; }
-  .guide-grid { min-width: calc(92px + var(--timeline-width)); }
+  .channel-corner, .channel-label { width: 112px; flex-basis: 112px; }
+  .timeline-head { margin-left: 112px; }
+  .guide-grid { min-width: calc(112px + var(--timeline-width)); }
+  .channel-logo { width: 64px; height: 23px; }
   .recording-card { grid-template-columns: 64px 1fr; gap: 14px; }
   .status-art { height: 54px; }
   .recording-actions { grid-column: 1 / -1; }

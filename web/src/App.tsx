@@ -12,7 +12,7 @@ type Toast = { tone: 'success' | 'error'; message: string }
 type Playback = { src: string; title: string; startAt: number; recordingId?: number; liveSessionId?: string }
 
 const HlsPlayer = lazy(() => import('./HlsPlayer').then((module) => ({ default: module.HlsPlayer })))
-const APP_VERSION = '1.14'
+const APP_VERSION = '1.15'
 
 function floorHalfHour(date: Date) {
   const result = new Date(date)

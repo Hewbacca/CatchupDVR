@@ -24,8 +24,13 @@ type xmlTV struct {
 }
 
 type xmlChannel struct {
-	ID           string   `xml:"id,attr"`
-	DisplayNames []string `xml:"display-name"`
+	ID           string    `xml:"id,attr"`
+	DisplayNames []string  `xml:"display-name"`
+	Icons        []xmlIcon `xml:"icon"`
+}
+
+type xmlIcon struct {
+	Source string `xml:"src,attr"`
 }
 
 type xmlProgram struct {
@@ -51,7 +56,7 @@ func ParseXMLTV(reader io.Reader) ([]model.Channel, []model.Program, error) {
 			continue
 		}
 		number, name := channelNames(raw)
-		channel := model.Channel{ID: raw.ID, Number: number, Name: name}
+		channel := model.Channel{ID: raw.ID, Number: number, Name: name, LogoURL: channelIcon(raw)}
 		channels = append(channels, channel)
 		channelByID[channel.ID] = channel
 	}
@@ -135,6 +140,15 @@ func channelNames(raw xmlChannel) (string, string) {
 		name = number
 	}
 	return number, name
+}
+
+func channelIcon(raw xmlChannel) string {
+	for _, icon := range raw.Icons {
+		if source := strings.TrimSpace(icon.Source); source != "" {
+			return source
+		}
+	}
+	return ""
 }
 
 func normalizeVirtualChannel(value string) string {

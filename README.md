@@ -5,6 +5,7 @@ CatchUp DVR is a subscription-free, self-hosted DVR for an HDHomeRun. It imports
 ## What works
 
 - SQLite-backed channels, programs, and recording jobs
+- Automatically resolved station logos, persisted across guide refreshes; XMLTV icons take priority, exact station and explicit affiliate matches supply a fallback, and uncertain matches remain blank
 - HDHomeRun guide download with a fresh `DeviceAuth` lookup on every refresh, gzip support, and last-good cache fallback
 - Generic XMLTV file or URL fallback
 - Responsive React/TypeScript guide and recording library

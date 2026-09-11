@@ -12,9 +12,10 @@ type AuthCredentials struct {
 }
 
 type Channel struct {
-	ID     string `json:"id"`
-	Number string `json:"number"`
-	Name   string `json:"name"`
+	ID      string `json:"id"`
+	Number  string `json:"number"`
+	Name    string `json:"name"`
+	LogoURL string `json:"logoUrl,omitempty"`
 }
 
 type Program struct {
