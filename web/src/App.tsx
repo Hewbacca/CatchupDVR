@@ -30,6 +30,7 @@ export default function App() {
   const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null)
   const [selected, setSelected] = useState<Program | null>(null)
   const [playing, setPlaying] = useState<Recording | null>(null)
+  const [deleting, setDeleting] = useState<Set<number>>(() => new Set())
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState<Toast | null>(null)
 
@@ -109,12 +110,20 @@ export default function App() {
   }, [guide, record, scheduled])
 
   async function deleteJob(recording: Recording) {
+    setDeleting((current) => new Set(current).add(recording.id))
     try {
       await removeRecording(recording.id)
       setRecordings((current) => current.filter((item) => item.id !== recording.id))
+      if (playing?.id === recording.id) setPlaying(null)
       setToast({ tone: 'success', message: `${recording.title} removed` })
     } catch (error) {
       setToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not remove recording' })
+    } finally {
+      setDeleting((current) => {
+        const next = new Set(current)
+        next.delete(recording.id)
+        return next
+      })
     }
   }
 
@@ -155,7 +164,7 @@ export default function App() {
                 <div className="recording-info"><span className="status-label">{recording.status}</span><h2>{recording.title}</h2><p>{when(recording.programStart, recording.programEnd)} · Channel {recording.channelNumber}</p>{recording.errorMessage && <p className="recording-error">{recording.errorMessage}</p>}</div>
                 <div className="recording-actions">
                   {recording.playlistPath && <button className="primary" onClick={() => setPlaying(recording)}>{recording.status === 'recording' ? 'Watch from start' : 'Play'}</button>}
-                  <button className="subtle danger" onClick={() => void deleteJob(recording)}>Delete</button>
+                  <button className="subtle danger" disabled={deleting.has(recording.id)} onClick={() => void deleteJob(recording)}>{deleting.has(recording.id) ? 'Stopping…' : recording.status === 'recording' ? 'Stop & Delete' : 'Delete'}</button>
                 </div>
               </article>
             ))}</div> : <Empty>Your scheduled and completed recordings will appear here.</Empty>}

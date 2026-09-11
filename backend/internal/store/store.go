@@ -422,6 +422,31 @@ heartbeat_at_unix=0, finished_at_unix=0, error_message=? WHERE id=? AND status='
 	return nil
 }
 
+func (s *Store) CancelRecording(ctx context.Context, id int64, now time.Time) (model.Recording, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return model.Recording{}, err
+	}
+	defer tx.Rollback()
+	var recording model.Recording
+	if err := scanRecording(tx.QueryRowContext(ctx, recordingSelect+` WHERE id=?`, id), &recording); err != nil {
+		return model.Recording{}, err
+	}
+	if recording.Status == "scheduled" || recording.Status == "recording" {
+		if _, err := tx.ExecContext(ctx, `UPDATE recordings SET status='cancelled', process_id=0,
+heartbeat_at_unix=?, finished_at_unix=?, error_message='' WHERE id=?`, now.Unix(), now.Unix(), id); err != nil {
+			return model.Recording{}, err
+		}
+		recording.Status = "cancelled"
+		recording.ProcessID = 0
+		recording.FinishedAt = unixTimePointer(now.Unix())
+	}
+	if err := tx.Commit(); err != nil {
+		return model.Recording{}, err
+	}
+	return recording, nil
+}
+
 func (s *Store) DeleteRecording(ctx context.Context, id int64) error {
 	result, err := s.db.ExecContext(ctx, "DELETE FROM recordings WHERE id=? AND status NOT IN ('recording')", id)
 	if err != nil {
@@ -429,7 +454,7 @@ func (s *Store) DeleteRecording(ctx context.Context, id int64) error {
 	}
 	affected, _ := result.RowsAffected()
 	if affected == 0 {
-		return fmt.Errorf("recording not found or active")
+		return fmt.Errorf("recording not found or still active")
 	}
 	return nil
 }

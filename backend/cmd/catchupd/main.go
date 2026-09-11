@@ -63,7 +63,7 @@ func main() {
 		recorder.Run(ctx)
 		close(recorderDone)
 	}()
-	server := &http.Server{Addr: cfg.HTTPAddr, Handler: httpapi.New(cfg, database, refresh, logger)}
+	server := &http.Server{Addr: cfg.HTTPAddr, Handler: httpapi.New(cfg, database, refresh, recorder, logger)}
 	logger.Info("CatchUp DVR listening", "address", cfg.HTTPAddr)
 	go func() {
 		<-ctx.Done()

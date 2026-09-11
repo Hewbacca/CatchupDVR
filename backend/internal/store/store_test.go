@@ -96,6 +96,25 @@ func TestClaimMarksElapsedRecordingFailed(t *testing.T) {
 	}
 }
 
+func TestCancelAllowsRecordingDeletion(t *testing.T) {
+	database, recording := scheduledFixture(t)
+	defer database.Close()
+	cancelled, err := database.CancelRecording(context.Background(), recording.ID, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cancelled.Status != "cancelled" {
+		t.Fatalf("unexpected cancellation: %#v", cancelled)
+	}
+	if err := database.DeleteRecording(context.Background(), recording.ID); err != nil {
+		t.Fatal(err)
+	}
+	all, err := database.Recordings(context.Background())
+	if err != nil || len(all) != 0 {
+		t.Fatalf("recording was not deleted: %#v, %v", all, err)
+	}
+}
+
 func TestOpenMigratesExistingRecordingTable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "old.db")
 	db, err := sql.Open("sqlite", path)

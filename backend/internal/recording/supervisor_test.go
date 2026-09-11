@@ -70,6 +70,45 @@ func TestSupervisorCapturesAndCompletesDueRecording(t *testing.T) {
 	}
 }
 
+func TestDeleteStopsActiveRecordingAndRemovesOutput(t *testing.T) {
+	now := time.Now().UTC()
+	repository := &fakeRepository{started: make(chan struct{}, 1), finished: make(chan finishResult, 1), due: &model.Recording{
+		ID: 9, ChannelNumber: "9.1", Status: "scheduled",
+		ScheduledStart: now.Add(-time.Minute), ScheduledEnd: now.Add(time.Hour),
+	}}
+	root := t.TempDir()
+	supervisor := NewSupervisor(repository, SupervisorConfig{
+		HDHomeRunIP: "192.168.0.103", RecordingsDir: root,
+		Profile: Profile{Mode: "software"}, PollInterval: 5 * time.Millisecond,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	supervisor.newProcess = func(command Command, _ io.Writer) process {
+		return &fakeProcess{playlistPath: command.Args[len(command.Args)-1], stopped: make(chan struct{})}
+	}
+	ctx, stop := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { supervisor.Run(ctx); close(done) }()
+	select {
+	case <-repository.started:
+	case <-time.After(time.Second):
+		t.Fatal("recording did not start")
+	}
+	if err := supervisor.Delete(context.Background(), 9); err != nil {
+		t.Fatal(err)
+	}
+	if !repository.deleted {
+		t.Fatal("recording row was not deleted")
+	}
+	if _, err := os.Stat(filepath.Join(root, "9")); !os.IsNotExist(err) {
+		t.Fatalf("recording output still exists: %v", err)
+	}
+	stop()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("supervisor did not stop")
+	}
+}
+
 type finishResult struct{ status, message string }
 
 type fakeRepository struct {
@@ -78,6 +117,8 @@ type fakeRepository struct {
 	playlist string
 	pid      int
 	finished chan finishResult
+	started  chan struct{}
+	deleted  bool
 }
 
 func (r *fakeRepository) ClaimDueRecording(context.Context, time.Time) (*model.Recording, error) {
@@ -97,6 +138,9 @@ func (r *fakeRepository) InterruptedRecordings(context.Context) ([]model.Recordi
 
 func (r *fakeRepository) SetRecordingProcess(_ context.Context, _ int64, playlist string, pid int, _ time.Time) error {
 	r.playlist, r.pid = playlist, pid
+	if r.started != nil {
+		r.started <- struct{}{}
+	}
 	return nil
 }
 
@@ -108,6 +152,15 @@ func (r *fakeRepository) FinishRecording(_ context.Context, _ int64, status, mes
 }
 
 func (r *fakeRepository) RequeueRecording(context.Context, int64, string) error { return nil }
+
+func (r *fakeRepository) CancelRecording(_ context.Context, id int64, _ time.Time) (model.Recording, error) {
+	return model.Recording{ID: id, Status: "cancelled"}, nil
+}
+
+func (r *fakeRepository) DeleteRecording(context.Context, int64) error {
+	r.deleted = true
+	return nil
+}
 
 type fakeProcess struct {
 	playlistPath string
