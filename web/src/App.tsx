@@ -7,6 +7,7 @@ type View = 'guide' | 'recordings'
 type Toast = { tone: 'success' | 'error'; message: string }
 
 const HlsPlayer = lazy(() => import('./HlsPlayer').then((module) => ({ default: module.HlsPlayer })))
+const APP_VERSION = '1.10'
 
 function floorHalfHour(date: Date) {
   const result = new Date(date)
@@ -171,6 +172,8 @@ export default function App() {
           </>
         )}
       </main>
+
+      <footer className="app-version">CatchUp DVR v{APP_VERSION}</footer>
 
       {selected && <div className="details-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelected(null) }}>
         <aside className="details" aria-label={`${selected.title} details`}>

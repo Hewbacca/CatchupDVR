@@ -4,6 +4,11 @@ import { useEffect, useRef, useState } from 'react'
 type Props = { src: string; title: string; onClose: () => void }
 type MediaRange = { start: number; end: number }
 
+function isSafari() {
+  const userAgent = navigator.userAgent
+  return /Safari\//.test(userAgent) && !/(Chrome|Chromium|CriOS|Edg|OPR)\//.test(userAgent)
+}
+
 function mediaRange(video: HTMLVideoElement): MediaRange | null {
   const ranges = video.seekable.length ? video.seekable : video.buffered
   if (!ranges.length) return null
@@ -70,7 +75,9 @@ export function HlsPlayer({ src, title, onClose }: Props) {
     let establishNativeStart: (() => void) | undefined
     const timelineEvents: Array<keyof HTMLMediaElementEventMap> = []
 
-    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    const nativeHls = Boolean(video.canPlayType('application/vnd.apple.mpegurl'))
+    const hlsJsSupported = Hls.isSupported()
+    if (nativeHls && (isSafari() || !hlsJsSupported)) {
       let startedAtBeginning = false
       const handleNativeStart = () => {
         updateTimeline(video)
@@ -88,7 +95,7 @@ export function HlsPlayer({ src, title, onClose }: Props) {
       }, 15_000)
       video.src = src
       video.load()
-    } else if (Hls.isSupported()) {
+    } else if (hlsJsSupported) {
       usesHlsRef.current = true
       hls = new Hls({
         autoStartLoad: false,
