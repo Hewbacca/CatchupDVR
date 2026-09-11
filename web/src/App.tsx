@@ -57,6 +57,7 @@ export default function App() {
   const [guideSearch, setGuideSearch] = useState('')
   const [searchResults, setSearchResults] = useState<Program[]>([])
   const [searchIndex, setSearchIndex] = useState(0)
+  const [activeSearchResultID, setActiveSearchResultID] = useState<string | null>(null)
   const [searching, setSearching] = useState(false)
   const [favoriteChannels, setFavoriteChannels] = useState<Set<string>>(() => new Set())
   const [recordings, setRecordings] = useState<Recording[]>([])
@@ -127,19 +128,22 @@ export default function App() {
     if (!auth?.authenticated || auth.tunerSetupRequired || !query) {
       setSearchResults([])
       setSearchIndex(0)
+      setActiveSearchResultID(null)
       setSearching(false)
       return
     }
     let active = true
     setSearchResults([])
     setSearchIndex(0)
+    setActiveSearchResultID(null)
+    setSelected(null)
     setSearching(true)
     const timer = window.setTimeout(() => {
       void searchGuide(query).then((results) => {
         if (!active) return
         setSearchResults(results)
         setSearching(false)
-        if (results.length) openSearchResult(results[0])
+        if (results.length) navigateSearchResult(results[0])
       }).catch((error) => {
         if (!active) return
         setSearching(false)
@@ -164,6 +168,7 @@ export default function App() {
 
   const scheduled = useMemo(() => new Set(recordings.filter((recording) => recording.status === 'scheduled' || recording.status === 'recording').map((recording) => recording.programId)), [recordings])
   const favoriteGuideChannels = useMemo(() => guide?.channels.filter((channel) => favoriteChannels.has(channel.id)) ?? [], [favoriteChannels, guide])
+  const searchResultIDs = useMemo(() => new Set(searchResults.map((program) => program.id)), [searchResults])
 
   async function toggleFavorite(channelID: string) {
     const wasFavorite = favoriteChannels.has(channelID)
@@ -297,17 +302,17 @@ export default function App() {
   const tunersAvailable = diagnostics?.tunersAvailable ?? Math.max(0, tunerCount - tunersInUse)
   const selectedIsAiringNow = selected ? isAiringNow(selected) : false
 
-  function openSearchResult(program: Program) {
+  function navigateSearchResult(program: Program) {
     setView('guide')
     setFrom(floorHalfHour(new Date(program.start)))
-    setSelected(program)
+    setActiveSearchResultID(program.id)
   }
 
   function moveSearchResult(direction: number) {
     if (!searchResults.length) return
     const nextIndex = (searchIndex + direction + searchResults.length) % searchResults.length
     setSearchIndex(nextIndex)
-    openSearchResult(searchResults[nextIndex])
+    navigateSearchResult(searchResults[nextIndex])
   }
 
   async function signOut() {
@@ -364,8 +369,8 @@ export default function App() {
               </div>
             </div>
             {loading ? <div className="loading-grid" aria-label="Loading guide" /> : guide && guide.channels.length ? <>
-              {favoriteGuideChannels.length > 0 && <section className="guide-section"><div className="guide-section-heading"><span className="eyebrow">Pinned channels</span><h2>Favorites</h2></div><GuideGrid channels={favoriteGuideChannels} programs={guide.programs} from={from} to={to} scheduled={scheduled} favorites={favoriteChannels} selected={selected} onSelect={setSelected} onToggleFavorite={(channelID) => void toggleFavorite(channelID)} /></section>}
-              <section className="guide-section"><div className="guide-section-heading"><span className="eyebrow">Complete lineup</span><h2>All channels</h2></div><GuideGrid channels={guide.channels} programs={guide.programs} from={from} to={to} scheduled={scheduled} favorites={favoriteChannels} selected={selected} onSelect={setSelected} onToggleFavorite={(channelID) => void toggleFavorite(channelID)} /></section>
+              {favoriteGuideChannels.length > 0 && <section className="guide-section"><div className="guide-section-heading"><span className="eyebrow">Pinned channels</span><h2>Favorites</h2></div><GuideGrid channels={favoriteGuideChannels} programs={guide.programs} from={from} to={to} scheduled={scheduled} favorites={favoriteChannels} selected={selected} searchResultIDs={searchResultIDs} activeSearchResultID={activeSearchResultID} searchText={guideSearch} onSelect={setSelected} onToggleFavorite={(channelID) => void toggleFavorite(channelID)} /></section>}
+              <section className="guide-section"><div className="guide-section-heading"><span className="eyebrow">Complete lineup</span><h2>All channels</h2></div><GuideGrid channels={guide.channels} programs={guide.programs} from={from} to={to} scheduled={scheduled} favorites={favoriteChannels} selected={selected} searchResultIDs={searchResultIDs} activeSearchResultID={activeSearchResultID} searchText={guideSearch} onSelect={setSelected} onToggleFavorite={(channelID) => void toggleFavorite(channelID)} /></section>
             </> : <Empty>No guide data yet. Refresh the guide from the server diagnostics.</Empty>}
           </>
         ) : (
