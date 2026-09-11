@@ -9,7 +9,7 @@ type Toast = { tone: 'success' | 'error'; message: string }
 type Playback = { src: string; title: string; startAt: number; recordingId?: number; liveSessionId?: string }
 
 const HlsPlayer = lazy(() => import('./HlsPlayer').then((module) => ({ default: module.HlsPlayer })))
-const APP_VERSION = '1.11'
+const APP_VERSION = '1.12'
 
 function floorHalfHour(date: Date) {
   const result = new Date(date)
@@ -20,6 +20,10 @@ function floorHalfHour(date: Date) {
 function when(start: string, end: string) {
   const formatter = new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })
   return `${formatter.format(new Date(start))}–${new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(new Date(end))}`
+}
+
+function isAiringNow(program: Program, now = Date.now()) {
+  return new Date(program.start).getTime() <= now && now < new Date(program.end).getTime()
 }
 
 function Empty({ children }: { children: React.ReactNode }) { return <div className="empty"><span>◌</span><p>{children}</p></div> }
@@ -117,6 +121,10 @@ export default function App() {
   }, [])
 
   async function watchLive(program: Program) {
+    if (!isAiringNow(program)) {
+      setToast({ tone: 'error', message: `${program.title} is not airing right now` })
+      return
+    }
     setLiveStarting(program.id)
     try {
       const session = await startLive(program.channel.number, program.title)
@@ -199,6 +207,7 @@ export default function App() {
   const tunerCount = diagnostics?.tunerCount ?? 0
   const tunersInUse = diagnostics?.tunersInUse ?? Math.min(tunerCount, inferredUsed)
   const tunersAvailable = diagnostics?.tunersAvailable ?? Math.max(0, tunerCount - tunersInUse)
+  const selectedIsAiringNow = selected ? isAiringNow(selected) : false
 
   return (
     <div className="app-shell">
@@ -258,7 +267,7 @@ export default function App() {
           <p className="description">{selected.description || 'No description is available.'}</p>
           <div className="padding-note">Recordings include 2 min before and 5 min after</div>
           <div className="details-actions">
-            <button className="primary live-button" disabled={liveStarting === selected.id} onClick={() => void watchLive(selected)}>{liveStarting === selected.id ? 'Starting live TV…' : 'Watch Live'}</button>
+            {selectedIsAiringNow && <button className="primary live-button" disabled={liveStarting === selected.id} onClick={() => void watchLive(selected)}>{liveStarting === selected.id ? 'Starting live TV…' : 'Watch Live'}</button>}
             <button className="subtle record-button" disabled={scheduled.has(selected.id)} onClick={() => void record(selected)}><span className="record-icon" />{scheduled.has(selected.id) ? 'Scheduled' : 'Record this program'}</button>
           </div>
         </aside>
