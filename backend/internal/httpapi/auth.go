@@ -28,6 +28,8 @@ const (
 	sessionLifetime   = 30 * 24 * time.Hour
 )
 
+type authenticationContextKey struct{}
+
 type authService struct {
 	store Store
 
@@ -104,6 +106,35 @@ func (a *authService) login(ctx context.Context, username, password string) (mod
 	return credentials, true, nil
 }
 
+func (a *authService) changePassword(ctx context.Context, currentPassword, newPassword string) (model.AuthCredentials, bool, error) {
+	if err := validatePassword(newPassword); err != nil {
+		return model.AuthCredentials{}, false, err
+	}
+	credentials, configured, err := a.getCredentials(ctx)
+	if err != nil || !configured {
+		return model.AuthCredentials{}, false, err
+	}
+	if bcrypt.CompareHashAndPassword([]byte(credentials.PasswordHash), []byte(currentPassword)) != nil {
+		return model.AuthCredentials{}, false, nil
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return model.AuthCredentials{}, false, err
+	}
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return model.AuthCredentials{}, false, err
+	}
+	credentials.PasswordHash, credentials.SessionSecret = string(hash), secret
+	if err := a.store.UpdateAuthCredentials(ctx, credentials); err != nil {
+		return model.AuthCredentials{}, false, err
+	}
+	a.mu.Lock()
+	a.credentials = credentials
+	a.mu.Unlock()
+	return credentials, true, nil
+}
+
 func (a *authService) sessionUser(ctx context.Context, cookie *http.Cookie) (string, bool, error) {
 	credentials, configured, err := a.getCredentials(ctx)
 	if err != nil || !configured || cookie == nil {
@@ -175,6 +206,28 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		CurrentPassword string `json:"currentPassword"`
+		NewPassword     string `json:"newPassword"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "current and new passwords are required")
+		return
+	}
+	credentials, changed, err := s.auth.changePassword(r.Context(), request.CurrentPassword, request.NewPassword)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !changed {
+		writeError(w, http.StatusUnauthorized, "current password is incorrect")
+		return
+	}
+	s.setSession(w, r, credentials)
+	writeJSON(w, http.StatusOK, map[string]bool{"changed": true})
+}
+
 // authentication leaves the application shell and account endpoints public so
 // a new install can display setup. Every API endpoint and recording asset is
 // otherwise protected, including HLS playlists and individual segments.
@@ -184,7 +237,7 @@ func (s *Server) authentication(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		_, valid, err := s.auth.sessionUser(r.Context(), sessionCookie(r))
+		username, valid, err := s.auth.sessionUser(r.Context(), sessionCookie(r))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "could not verify session")
 			return
@@ -193,8 +246,13 @@ func (s *Server) authentication(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "sign in required")
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), authenticationContextKey{}, username)))
 	})
+}
+
+func authenticatedUsername(r *http.Request) (string, bool) {
+	username, ok := r.Context().Value(authenticationContextKey{}).(string)
+	return username, ok && username != ""
 }
 
 func publicAuthenticationRoute(path string) bool {
@@ -251,8 +309,12 @@ func validateAccount(username, password string) error {
 	if username == "" || len(username) > 128 || !utf8.ValidString(username) || strings.ContainsAny(username, "\r\n\x00") {
 		return errors.New("choose a username between 1 and 128 characters")
 	}
-	if len(password) < 12 {
-		return errors.New("choose a password with at least 12 characters")
+	return validatePassword(password)
+}
+
+func validatePassword(password string) error {
+	if len(password) < 10 {
+		return errors.New("choose a password with at least 10 characters")
 	}
 	if len(password) > 256 {
 		return errors.New("password must be 256 characters or fewer")

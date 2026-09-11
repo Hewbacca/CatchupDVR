@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -93,6 +95,12 @@ CREATE TABLE IF NOT EXISTS authentication (
   password_hash TEXT NOT NULL,
   session_secret BLOB NOT NULL,
   created_at_unix INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS favorite_channels (
+  username TEXT NOT NULL,
+  channel_id TEXT NOT NULL,
+  created_at_unix INTEGER NOT NULL,
+  PRIMARY KEY(username, channel_id)
 );
 `)
 	if err != nil {
@@ -214,6 +222,83 @@ WHERE p.start_unix < ? AND p.end_unix > ? ORDER BY p.start_unix`, to.Unix(), fro
 		program.Start = time.Unix(start, 0).UTC()
 		program.End = time.Unix(end, 0).UTC()
 		result.Programs = append(result.Programs, program)
+	}
+	return result, rows.Err()
+}
+
+// GuideDays returns only calendar days that contain at least one programme.
+// The server's local timezone is used so the selector matches the broadcast
+// schedule and the timestamp display shown to the household.
+func (s *Store) GuideDays(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT start_unix, end_unix FROM programs")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	days := map[string]struct{}{}
+	for rows.Next() {
+		var startUnix, endUnix int64
+		if err := rows.Scan(&startUnix, &endUnix); err != nil {
+			return nil, err
+		}
+		start := time.Unix(startUnix, 0).In(time.Local)
+		end := time.Unix(endUnix, 0).In(time.Local)
+		day := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, time.Local)
+		// An exactly-midnight end belongs to the preceding day, not the next one.
+		if end.Hour() == 0 && end.Minute() == 0 && end.Second() == 0 && end.Nanosecond() == 0 && end.After(start) {
+			end = end.Add(-time.Nanosecond)
+		}
+		lastDay := time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, time.Local)
+		for !day.After(lastDay) {
+			days[day.Format("2006-01-02")] = struct{}{}
+			day = day.AddDate(0, 0, 1)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	result := make([]string, 0, len(days))
+	for day := range days {
+		result = append(result, day)
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
+// SearchGuide finds programmes across every guide day currently stored. LIKE
+// wildcards from a search box are escaped so a viewer's text is always treated
+// as text, not as a database pattern.
+func (s *Store) SearchGuide(ctx context.Context, query string) ([]model.Program, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return []model.Program{}, nil
+	}
+	escaped := strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_").Replace(query)
+	pattern := "%" + escaped + "%"
+	rows, err := s.db.QueryContext(ctx, `SELECT p.id, p.channel_id, c.number, c.name, p.start_unix, p.end_unix, p.title, p.subtitle, p.description, p.category
+FROM programs p JOIN channels c ON c.id=p.channel_id
+WHERE p.title LIKE ? ESCAPE '\' COLLATE NOCASE
+   OR p.subtitle LIKE ? ESCAPE '\' COLLATE NOCASE
+   OR p.description LIKE ? ESCAPE '\' COLLATE NOCASE
+   OR p.category LIKE ? ESCAPE '\' COLLATE NOCASE
+   OR c.name LIKE ? ESCAPE '\' COLLATE NOCASE
+   OR c.number LIKE ? ESCAPE '\' COLLATE NOCASE
+ORDER BY p.start_unix, c.number LIMIT 200`, pattern, pattern, pattern, pattern, pattern, pattern)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]model.Program, 0)
+	for rows.Next() {
+		var program model.Program
+		var start, end int64
+		if err := rows.Scan(&program.ID, &program.ChannelID, &program.Channel.Number, &program.Channel.Name, &start, &end, &program.Title, &program.Subtitle, &program.Description, &program.Category); err != nil {
+			return nil, err
+		}
+		program.Channel.ID = program.ChannelID
+		program.Start = time.Unix(start, 0).UTC()
+		program.End = time.Unix(end, 0).UTC()
+		result = append(result, program)
 	}
 	return result, rows.Err()
 }
@@ -501,6 +586,51 @@ VALUES(1, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`, credentials.Username, credent
 		return ErrAuthenticationConfigured
 	}
 	return nil
+}
+
+// UpdateAuthCredentials replaces the password hash and session secret while
+// retaining the original account identity. Rotating the secret invalidates all
+// existing browser sessions after a password change.
+func (s *Store) UpdateAuthCredentials(ctx context.Context, credentials model.AuthCredentials) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE authentication SET password_hash=?, session_secret=? WHERE id=1`, credentials.PasswordHash, credentials.SessionSecret)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return errors.New("account has not been configured")
+	}
+	return nil
+}
+
+func (s *Store) FavoriteChannels(ctx context.Context, username string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT channel_id FROM favorite_channels WHERE username=? ORDER BY created_at_unix, channel_id", username)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	channels := make([]string, 0)
+	for rows.Next() {
+		var channelID string
+		if err := rows.Scan(&channelID); err != nil {
+			return nil, err
+		}
+		channels = append(channels, channelID)
+	}
+	return channels, rows.Err()
+}
+
+func (s *Store) SetFavoriteChannel(ctx context.Context, username, channelID string, favorite bool) error {
+	if favorite {
+		_, err := s.db.ExecContext(ctx, `INSERT INTO favorite_channels(username, channel_id, created_at_unix)
+VALUES(?, ?, ?) ON CONFLICT(username, channel_id) DO NOTHING`, username, channelID, time.Now().UTC().Unix())
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, "DELETE FROM favorite_channels WHERE username=? AND channel_id=?", username, channelID)
+	return err
 }
 
 func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }

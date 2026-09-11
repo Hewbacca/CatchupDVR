@@ -24,10 +24,15 @@ import (
 
 type Store interface {
 	Guide(context.Context, time.Time, time.Time) (model.Guide, error)
+	GuideDays(context.Context) ([]string, error)
+	SearchGuide(context.Context, string) ([]model.Program, error)
 	Schedule(context.Context, string, int, int, int) (model.Recording, error)
 	Recordings(context.Context) ([]model.Recording, error)
 	AuthCredentials(context.Context) (model.AuthCredentials, bool, error)
 	CreateAuthCredentials(context.Context, model.AuthCredentials) error
+	UpdateAuthCredentials(context.Context, model.AuthCredentials) error
+	FavoriteChannels(context.Context, string) ([]string, error)
+	SetFavoriteChannel(context.Context, string, string, bool) error
 	Ping(context.Context) error
 }
 
@@ -62,9 +67,15 @@ func New(cfg config.Config, store Store, refresh guide.RefreshService, recorder 
 	mux.HandleFunc("POST /api/auth/setup", server.setupAccount)
 	mux.HandleFunc("POST /api/auth/login", server.login)
 	mux.HandleFunc("POST /api/auth/logout", server.logout)
+	mux.HandleFunc("POST /api/auth/password", server.changePassword)
 	mux.HandleFunc("GET /api/health", server.health)
 	mux.HandleFunc("GET /api/diagnostics", server.diagnostics)
+	mux.HandleFunc("GET /api/guide/days", server.getGuideDays)
+	mux.HandleFunc("GET /api/guide/search", server.searchGuide)
 	mux.HandleFunc("GET /api/guide", server.getGuide)
+	mux.HandleFunc("GET /api/preferences/favorite-channels", server.getFavoriteChannels)
+	mux.HandleFunc("PUT /api/preferences/favorite-channels/{id}", server.addFavoriteChannel)
+	mux.HandleFunc("DELETE /api/preferences/favorite-channels/{id}", server.removeFavoriteChannel)
 	mux.HandleFunc("POST /api/admin/guide/refresh", server.refreshGuide)
 	mux.HandleFunc("GET /api/recordings", server.getRecordings)
 	mux.HandleFunc("POST /api/recordings", server.createRecording)
@@ -113,6 +124,69 @@ func (s *Server) getGuide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) getGuideDays(w http.ResponseWriter, r *http.Request) {
+	days, err := s.store.GuideDays(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not read guide days")
+		return
+	}
+	writeJSON(w, http.StatusOK, days)
+}
+
+func (s *Server) searchGuide(w http.ResponseWriter, r *http.Request) {
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if len(query) > 120 {
+		writeError(w, http.StatusBadRequest, "search text must be 120 characters or fewer")
+		return
+	}
+	programs, err := s.store.SearchGuide(r.Context(), query)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not search guide")
+		return
+	}
+	writeJSON(w, http.StatusOK, programs)
+}
+
+func (s *Server) getFavoriteChannels(w http.ResponseWriter, r *http.Request) {
+	username, ok := authenticatedUsername(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "sign in required")
+		return
+	}
+	channels, err := s.store.FavoriteChannels(r.Context(), username)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not read favorite channels")
+		return
+	}
+	writeJSON(w, http.StatusOK, channels)
+}
+
+func (s *Server) addFavoriteChannel(w http.ResponseWriter, r *http.Request) {
+	s.setFavoriteChannel(w, r, true)
+}
+
+func (s *Server) removeFavoriteChannel(w http.ResponseWriter, r *http.Request) {
+	s.setFavoriteChannel(w, r, false)
+}
+
+func (s *Server) setFavoriteChannel(w http.ResponseWriter, r *http.Request, favorite bool) {
+	username, ok := authenticatedUsername(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "sign in required")
+		return
+	}
+	channelID := strings.TrimSpace(r.PathValue("id"))
+	if channelID == "" || len(channelID) > 256 {
+		writeError(w, http.StatusBadRequest, "invalid channel")
+		return
+	}
+	if err := s.store.SetFavoriteChannel(r.Context(), username, channelID, favorite); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not update favorite channel")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) refreshGuide(w http.ResponseWriter, r *http.Request) {

@@ -1,4 +1,4 @@
-import type { Diagnostics, Guide, LiveSession, Recording } from './types'
+import type { Diagnostics, Guide, LiveSession, Program, Recording } from './types'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { credentials: 'same-origin', ...init })
@@ -28,9 +28,27 @@ export async function logout() {
   if (!response.ok) throw new Error('Could not sign out')
 }
 
+export function changePassword(currentPassword: string, newPassword: string) {
+  return request<{ changed: boolean }>('/api/auth/password', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ currentPassword, newPassword }),
+  })
+}
+
 export function getGuide(from: Date, to: Date) {
   const query = new URLSearchParams({ from: from.toISOString(), to: to.toISOString() })
   return request<Guide>(`/api/guide?${query}`)
+}
+
+export function getGuideDays() { return request<string[]>('/api/guide/days') }
+
+export function searchGuide(query: string) {
+  return request<Program[]>(`/api/guide/search?${new URLSearchParams({ q: query })}`)
+}
+
+export function getFavoriteChannels() { return request<string[]>('/api/preferences/favorite-channels') }
+
+export function setFavoriteChannel(channelID: string, favorite: boolean) {
+  return request<void>(`/api/preferences/favorite-channels/${encodeURIComponent(channelID)}`, { method: favorite ? 'PUT' : 'DELETE' })
 }
 
 export function getRecordings() { return request<Recording[]>('/api/recordings') }

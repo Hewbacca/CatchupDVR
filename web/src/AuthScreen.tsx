@@ -37,8 +37,8 @@ export function AuthScreen({ setupRequired, onAuthenticated }: Props) {
       <p>{setupRequired ? 'This one-time account protects CatchUp before it is available on the internet.' : 'Sign in to view your guide and recordings.'}</p>
       <form onSubmit={(event) => void submit(event)}>
         <label>Username<input autoComplete={setupRequired ? 'username' : 'username'} value={username} onChange={(event) => setUsername(event.target.value)} required maxLength={128} /></label>
-        <label>Password<input type="password" autoComplete={setupRequired ? 'new-password' : 'current-password'} value={password} onChange={(event) => setPassword(event.target.value)} required minLength={setupRequired ? 12 : undefined} /></label>
-        {setupRequired && <label>Confirm password<input type="password" autoComplete="new-password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} required minLength={12} /></label>}
+        <label>Password<input type="password" autoComplete={setupRequired ? 'new-password' : 'current-password'} value={password} onChange={(event) => setPassword(event.target.value)} required minLength={setupRequired ? 10 : undefined} /></label>
+        {setupRequired && <label>Confirm password<input type="password" autoComplete="new-password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} required minLength={10} /></label>}
         {error && <p className="auth-error" role="alert">{error}</p>}
         <button className="primary auth-submit" disabled={submitting}>{submitting ? 'Please wait…' : setupRequired ? 'Create account' : 'Sign in'}</button>
       </form>

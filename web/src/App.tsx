@@ -1,8 +1,9 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
-import { getAuthStatus, getDiagnostics, getGuide, getRecordings, logout, removeRecording, schedule, startLive, stopLive } from './api'
+import { getAuthStatus, getDiagnostics, getFavoriteChannels, getGuide, getGuideDays, getRecordings, logout, removeRecording, schedule, searchGuide, setFavoriteChannel, startLive, stopLive } from './api'
 import { AuthScreen } from './AuthScreen'
 import { GuideGrid } from './GuideGrid'
 import { readResumePositions, writeResumePositions } from './resume'
+import { SettingsPanel } from './SettingsPanel'
 import type { AuthStatus } from './api'
 import type { Diagnostics, Guide, Program, Recording } from './types'
 
@@ -11,12 +12,28 @@ type Toast = { tone: 'success' | 'error'; message: string }
 type Playback = { src: string; title: string; startAt: number; recordingId?: number; liveSessionId?: string }
 
 const HlsPlayer = lazy(() => import('./HlsPlayer').then((module) => ({ default: module.HlsPlayer })))
-const APP_VERSION = '1.13'
+const APP_VERSION = '1.14'
 
 function floorHalfHour(date: Date) {
   const result = new Date(date)
   result.setMinutes(result.getMinutes() < 30 ? 0 : 30, 0, 0)
   return result
+}
+
+function guideDayValue(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function guideDayStart(value: string) {
+  const [year, month, day] = value.split('-').map(Number)
+  return new Date(year, month - 1, day)
+}
+
+function guideDayLabel(value: string) {
+  return new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'short', day: 'numeric' }).format(guideDayStart(value))
 }
 
 function when(start: string, end: string) {
@@ -35,6 +52,12 @@ export default function App() {
   const [from, setFrom] = useState(() => floorHalfHour(new Date()))
   const to = useMemo(() => new Date(from.getTime() + 6 * 60 * 60 * 1000), [from])
   const [guide, setGuide] = useState<Guide | null>(null)
+  const [guideDays, setGuideDays] = useState<string[]>([])
+  const [guideSearch, setGuideSearch] = useState('')
+  const [searchResults, setSearchResults] = useState<Program[]>([])
+  const [searchIndex, setSearchIndex] = useState(0)
+  const [searching, setSearching] = useState(false)
+  const [favoriteChannels, setFavoriteChannels] = useState<Set<string>>(() => new Set())
   const [recordings, setRecordings] = useState<Recording[]>([])
   const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null)
   const [selected, setSelected] = useState<Program | null>(null)
@@ -44,6 +67,7 @@ export default function App() {
   const [deleting, setDeleting] = useState<Set<number>>(() => new Set())
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState<Toast | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [auth, setAuth] = useState<AuthStatus | null>(null)
   const [authError, setAuthError] = useState('')
 
@@ -59,8 +83,8 @@ export default function App() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [nextGuide, nextRecordings, nextDiagnostics] = await Promise.all([getGuide(from, to), getRecordings(), getDiagnostics()])
-      setGuide(nextGuide); setRecordings(nextRecordings); setDiagnostics(nextDiagnostics)
+      const [nextGuide, nextRecordings, nextDiagnostics, nextGuideDays, nextFavoriteChannels] = await Promise.all([getGuide(from, to), getRecordings(), getDiagnostics(), getGuideDays(), getFavoriteChannels()])
+      setGuide(nextGuide); setRecordings(nextRecordings); setDiagnostics(nextDiagnostics); setGuideDays(nextGuideDays); setFavoriteChannels(new Set(nextFavoriteChannels))
     } catch (error) {
       setToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not reach the DVR' })
     } finally { setLoading(false) }
@@ -98,6 +122,32 @@ export default function App() {
     return () => { active = false; window.clearInterval(timer) }
   }, [auth?.authenticated, view])
   useEffect(() => {
+    const query = guideSearch.trim()
+    if (!auth?.authenticated || !query) {
+      setSearchResults([])
+      setSearchIndex(0)
+      setSearching(false)
+      return
+    }
+    let active = true
+    setSearchResults([])
+    setSearchIndex(0)
+    setSearching(true)
+    const timer = window.setTimeout(() => {
+      void searchGuide(query).then((results) => {
+        if (!active) return
+        setSearchResults(results)
+        setSearching(false)
+        if (results.length) openSearchResult(results[0])
+      }).catch((error) => {
+        if (!active) return
+        setSearching(false)
+        setToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not search the guide' })
+      })
+    }, 250)
+    return () => { active = false; window.clearTimeout(timer) }
+  }, [auth?.authenticated, guideSearch])
+  useEffect(() => {
     if (!toast) return
     const timer = window.setTimeout(() => setToast(null), 4500)
     return () => window.clearTimeout(timer)
@@ -112,6 +162,28 @@ export default function App() {
   }, [playing?.liveSessionId])
 
   const scheduled = useMemo(() => new Set(recordings.filter((recording) => recording.status === 'scheduled' || recording.status === 'recording').map((recording) => recording.programId)), [recordings])
+  const favoriteGuideChannels = useMemo(() => guide?.channels.filter((channel) => favoriteChannels.has(channel.id)) ?? [], [favoriteChannels, guide])
+
+  async function toggleFavorite(channelID: string) {
+    const wasFavorite = favoriteChannels.has(channelID)
+    setFavoriteChannels((current) => {
+      const next = new Set(current)
+      if (wasFavorite) next.delete(channelID)
+      else next.add(channelID)
+      return next
+    })
+    try {
+      await setFavoriteChannel(channelID, !wasFavorite)
+    } catch (error) {
+      setFavoriteChannels((current) => {
+        const next = new Set(current)
+        if (wasFavorite) next.add(channelID)
+        else next.delete(channelID)
+        return next
+      })
+      setToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not update favorite channel' })
+    }
+  }
 
   const record = useCallback(async (program: Program) => {
     try {
@@ -224,6 +296,19 @@ export default function App() {
   const tunersAvailable = diagnostics?.tunersAvailable ?? Math.max(0, tunerCount - tunersInUse)
   const selectedIsAiringNow = selected ? isAiringNow(selected) : false
 
+  function openSearchResult(program: Program) {
+    setView('guide')
+    setFrom(floorHalfHour(new Date(program.start)))
+    setSelected(program)
+  }
+
+  function moveSearchResult(direction: number) {
+    if (!searchResults.length) return
+    const nextIndex = (searchIndex + direction + searchResults.length) % searchResults.length
+    setSearchIndex(nextIndex)
+    openSearchResult(searchResults[nextIndex])
+  }
+
   async function signOut() {
     const liveSessionID = playing?.liveSessionId
     if (liveSessionID) {
@@ -231,7 +316,7 @@ export default function App() {
     }
     try {
       await logout()
-      setPlaying(null); setSelected(null); setGuide(null); setRecordings([]); setDiagnostics(null); setAuth({ setupRequired: false, authenticated: false })
+      setPlaying(null); setSelected(null); setSettingsOpen(false); setGuide(null); setGuideDays([]); setGuideSearch(''); setSearchResults([]); setFavoriteChannels(new Set()); setRecordings([]); setDiagnostics(null); setAuth({ setupRequired: false, authenticated: false })
     } catch (error) {
       setToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not sign out' })
     }
@@ -252,6 +337,7 @@ export default function App() {
           <span className="tuner-lights" aria-hidden="true">{Array.from({ length: tunerCount }, (_, index) => <i key={index} className={index < tunersInUse ? 'busy' : 'online'} />)}</span>
           {diagnostics ? `${tunersAvailable} of ${tunerCount} free` : 'Offline'}
         </div>
+        <button className="settings-button" onClick={() => setSettingsOpen(true)} aria-label="Settings"><span aria-hidden="true">⚙</span><span>Settings</span></button>
         <button className="sign-out" onClick={() => void signOut()}>Sign out</button>
       </header>
 
@@ -260,15 +346,25 @@ export default function App() {
           <>
             <div className="page-heading">
               <div><span className="eyebrow">Live TV</span><h1>{titleDate}</h1></div>
-              <div className="date-controls">
-                <button onClick={() => setFrom((date) => new Date(date.getTime() - 3 * 60 * 60 * 1000))} aria-label="Earlier programs">‹</button>
-                <button onClick={() => setFrom(floorHalfHour(new Date()))}>Now</button>
-                <button onClick={() => setFrom((date) => new Date(date.getTime() + 3 * 60 * 60 * 1000))} aria-label="Later programs">›</button>
+              <div className="guide-controls">
+                <label className="guide-search"><span className="sr-only">Search available guide</span><input type="search" value={guideSearch} onChange={(event) => setGuideSearch(event.target.value)} placeholder="Search guide" /></label>
+                {guideSearch.trim() && <div className="search-results" role="status">
+                  {searching ? <span>Searching…</span> : searchResults.length ? <><button onClick={() => moveSearchResult(-1)} aria-label="Previous match">‹</button><span>{searchIndex + 1} of {searchResults.length} {searchResults.length === 1 ? 'match' : 'matches'}</span><button onClick={() => moveSearchResult(1)} aria-label="Next match">›</button></> : <span>No matches</span>}
+                </div>}
+                <div className="date-controls">
+                  <button onClick={() => setFrom((date) => new Date(date.getTime() - 60 * 60 * 1000))} aria-label="One hour earlier">‹</button>
+                  <select aria-label="Guide day" value={guideDayValue(from)} onChange={(event) => setFrom(guideDayStart(event.target.value))} disabled={!guideDays.length}>
+                    {guideDays.map((day) => <option key={day} value={day}>{guideDayLabel(day)}</option>)}
+                  </select>
+                  <button onClick={() => setFrom(floorHalfHour(new Date()))}>Now</button>
+                  <button onClick={() => setFrom((date) => new Date(date.getTime() + 60 * 60 * 1000))} aria-label="One hour later">›</button>
+                </div>
               </div>
             </div>
-            {loading ? <div className="loading-grid" aria-label="Loading guide" /> : guide && guide.channels.length ? (
-              <GuideGrid channels={guide.channels} programs={guide.programs} from={from} to={to} scheduled={scheduled} selected={selected} onSelect={setSelected} />
-            ) : <Empty>No guide data yet. Refresh the guide from the server diagnostics.</Empty>}
+            {loading ? <div className="loading-grid" aria-label="Loading guide" /> : guide && guide.channels.length ? <>
+              {favoriteGuideChannels.length > 0 && <section className="guide-section"><div className="guide-section-heading"><span className="eyebrow">Pinned channels</span><h2>Favorites</h2></div><GuideGrid channels={favoriteGuideChannels} programs={guide.programs} from={from} to={to} scheduled={scheduled} favorites={favoriteChannels} selected={selected} onSelect={setSelected} onToggleFavorite={(channelID) => void toggleFavorite(channelID)} /></section>}
+              <section className="guide-section"><div className="guide-section-heading"><span className="eyebrow">Complete lineup</span><h2>All channels</h2></div><GuideGrid channels={guide.channels} programs={guide.programs} from={from} to={to} scheduled={scheduled} favorites={favoriteChannels} selected={selected} onSelect={setSelected} onToggleFavorite={(channelID) => void toggleFavorite(channelID)} /></section>
+            </> : <Empty>No guide data yet. Refresh the guide from the server diagnostics.</Empty>}
           </>
         ) : (
           <>
@@ -304,6 +400,8 @@ export default function App() {
           </div>
         </aside>
       </div>}
+
+      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} onPasswordChanged={() => setToast({ tone: 'success', message: 'Password changed. Other browsers have been signed out.' })} />}
 
       {playing && <Suspense fallback={null}><HlsPlayer src={playing.src} title={playing.title} startAt={playing.startAt} onProgress={playing.recordingId ? (seconds) => rememberPosition(playing.recordingId!, seconds) : undefined} onClose={closePlayer} /></Suspense>}
       {toast && <div className={`toast ${toast.tone}`} role="status">{toast.message}</div>}
