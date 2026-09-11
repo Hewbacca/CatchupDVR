@@ -74,6 +74,12 @@ export function startLive(channelNumber: string, title: string) {
   })
 }
 
+export function createCastMedia(playlistPath: string, liveSessionId?: string) {
+  return request<{ path: string }>('/api/cast', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ playlistPath, liveSessionId }),
+  })
+}
+
 export async function stopLive(id: string, keepalive = false) {
   const response = await fetch(`/api/live/${encodeURIComponent(id)}`, { method: 'DELETE', keepalive })
   if (!response.ok) {

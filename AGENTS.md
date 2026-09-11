@@ -56,6 +56,11 @@ large implementation notes here.
 - Live TV creates a temporary rewind buffer. It must not become a library
   recording unless the user explicitly records it, and it must be cleaned up
   when playback ends.
+- Google Cast uses Google's Default Media Receiver: keep the controls in the
+  web player and issue an in-memory, short-idle, stream-scoped URL for the TV.
+  Never make recordings public or rely on the browser's session cookie for a
+  receiver fetch. An idle live Cast link must stop its live session and release
+  the tuner.
 
 ## Change-control rules
 

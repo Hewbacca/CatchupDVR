@@ -9,7 +9,9 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -52,22 +54,25 @@ type TunerCounter interface {
 }
 
 type Server struct {
-	config   config.Config
-	tuner    *config.TunerAddress
-	store    Store
-	refresh  guide.RefreshService
-	logger   *slog.Logger
-	recorder RecordingController
-	live     LiveController
-	tuners   TunerCounter
-	auth     *authService
+	config     config.Config
+	tuner      *config.TunerAddress
+	store      Store
+	refresh    guide.RefreshService
+	logger     *slog.Logger
+	recorder   RecordingController
+	live       LiveController
+	tuners     TunerCounter
+	auth       *authService
+	cast       *castService
+	recordings http.Handler
 }
 
 func New(cfg config.Config, tuner *config.TunerAddress, store Store, refresh guide.RefreshService, recorder RecordingController, live LiveController, tuners TunerCounter, logger *slog.Logger) http.Handler {
 	if tuner == nil {
 		tuner = config.NewTunerAddress("")
 	}
-	server := &Server{config: cfg, tuner: tuner, store: store, refresh: refresh, recorder: recorder, live: live, tuners: tuners, logger: logger, auth: newAuthService(store)}
+	server := &Server{config: cfg, tuner: tuner, store: store, refresh: refresh, recorder: recorder, live: live, tuners: tuners, logger: logger, auth: newAuthService(store), cast: newCastService(live)}
+	server.recordings = noCacheHLS(http.FileServer(http.Dir(cfg.RecordingsDir)))
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/auth/status", server.authStatus)
 	mux.HandleFunc("POST /api/auth/setup", server.setupAccount)
@@ -90,7 +95,9 @@ func New(cfg config.Config, tuner *config.TunerAddress, store Store, refresh gui
 	mux.HandleFunc("DELETE /api/recordings/{id}", server.deleteRecording)
 	mux.HandleFunc("POST /api/live", server.startLive)
 	mux.HandleFunc("DELETE /api/live/{id}", server.stopLive)
-	mux.Handle("/recordings/", http.StripPrefix("/recordings/", noCacheHLS(http.FileServer(http.Dir(cfg.RecordingsDir)))))
+	mux.HandleFunc("POST /api/cast", server.createCastMedia)
+	mux.HandleFunc("GET /cast/{token}/recordings/{asset...}", server.castRecording)
+	mux.Handle("/recordings/", http.StripPrefix("/recordings/", server.recordings))
 	if info, err := os.Stat(cfg.WebDir); err == nil && info.IsDir() {
 		mux.Handle("/", spaHandler(cfg.WebDir))
 	}
@@ -294,11 +301,76 @@ func (s *Server) startLive(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) stopLive(w http.ResponseWriter, r *http.Request) {
-	if err := s.live.Stop(r.Context(), r.PathValue("id")); err != nil {
+	id := r.PathValue("id")
+	s.cast.revokeLive(id)
+	if err := s.live.Stop(r.Context(), id); err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) createCastMedia(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		PlaylistPath  string `json:"playlistPath"`
+		LiveSessionID string `json:"liveSessionId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "playlistPath is required")
+		return
+	}
+	playlistPath, ok := cleanCastPath(request.PlaylistPath)
+	if !ok || !strings.HasSuffix(playlistPath, ".m3u8") {
+		writeError(w, http.StatusBadRequest, "invalid HLS playlist")
+		return
+	}
+	if request.LiveSessionID != "" && playlistPath != path.Join(".live", request.LiveSessionID, "index.m3u8") {
+		writeError(w, http.StatusBadRequest, "live session does not match the playlist")
+		return
+	}
+	playlistFile := filepath.Join(s.config.RecordingsDir, filepath.FromSlash(playlistPath))
+	if info, err := os.Stat(playlistFile); err != nil || info.IsDir() {
+		writeError(w, http.StatusNotFound, "recording playlist is not available")
+		return
+	}
+	token, err := s.cast.issue(playlistPath, request.LiveSessionID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not prepare the Cast stream")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"path": castPath(token, playlistPath)})
+}
+
+func (s *Server) castRecording(w http.ResponseWriter, r *http.Request) {
+	asset := r.PathValue("asset")
+	if !s.cast.authorize(r.PathValue("token"), asset) {
+		writeError(w, http.StatusNotFound, "Cast stream is no longer available")
+		return
+	}
+	// The Default Media Receiver fetches HLS itself, rather than inheriting the
+	// browser's login cookie. The opaque path token is the authorization, so it
+	// is safe to permit the receiver's cross-origin media reads.
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Expose-Headers", "Content-Length, Content-Range")
+	clone := r.Clone(r.Context())
+	url := *r.URL
+	url.Path = "/" + asset
+	url.RawPath = ""
+	url.RawQuery = ""
+	clone.URL = &url
+	s.recordings.ServeHTTP(w, clone)
+}
+
+func castPath(token, playlistPath string) string {
+	parts := strings.Split(playlistPath, "/")
+	for index, part := range parts {
+		parts[index] = pathEscapeSegment(part)
+	}
+	return "/cast/" + token + "/recordings/" + strings.Join(parts, "/")
+}
+
+func pathEscapeSegment(value string) string {
+	return url.PathEscape(value)
 }
 
 func parseTime(value string, fallback time.Time) time.Time {

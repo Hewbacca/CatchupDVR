@@ -40,6 +40,7 @@ type LiveManager struct {
 	config     LiveConfig
 	logger     *slog.Logger
 	newProcess func(Command, io.Writer) process
+	removeAll  func(string) error
 	mu         sync.Mutex
 	jobs       map[string]*liveJob
 	waitGroup  sync.WaitGroup
@@ -84,7 +85,8 @@ func NewLiveManager(ctx context.Context, config LiveConfig, logger *slog.Logger)
 			cmd.Stderr = output
 			return &commandProcess{command: cmd}
 		},
-		jobs: make(map[string]*liveJob),
+		removeAll: os.RemoveAll,
+		jobs:      make(map[string]*liveJob),
 	}
 }
 
@@ -154,16 +156,19 @@ func (m *LiveManager) Wait() { m.waitGroup.Wait() }
 
 func (m *LiveManager) run(ctx context.Context, job *liveJob) {
 	defer m.waitGroup.Done()
-	defer close(job.done)
-	defer m.config.Pool.Release(job.key)
 	defer func() {
 		m.mu.Lock()
 		delete(m.jobs, job.session.ID)
 		m.mu.Unlock()
-		if err := os.RemoveAll(job.dir); err != nil {
+		if err := m.removeAll(job.dir); err != nil {
 			m.logger.Warn("remove live buffer", "session", job.session.ID, "error", err)
 		}
 	}()
+	// Release the tuner before deleting the temporary HLS files. A watched live
+	// buffer can contain many segments (or live on a slower mount), and cleanup
+	// must never make a stopped session continue to reserve a tuner.
+	defer close(job.done)
+	defer m.config.Pool.Release(job.key)
 	go func() { job.waitResult <- job.process.Wait() }()
 	timer := time.NewTimer(m.config.MaxDuration)
 	defer timer.Stop()

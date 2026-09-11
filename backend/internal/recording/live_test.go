@@ -47,6 +47,49 @@ func TestLiveSessionCreatesAndRemovesTemporaryBuffer(t *testing.T) {
 	}
 }
 
+func TestLiveStopReleasesTunerBeforeBufferCleanup(t *testing.T) {
+	root := t.TempDir()
+	pool := NewTunerPool(1)
+	manager := NewLiveManager(context.Background(), LiveConfig{
+		HDHomeRunAddress: func() string { return "192.168.0.103" }, RecordingsDir: root, Pool: pool,
+		Profile: Profile{Mode: "software"}, ReadyTimeout: time.Second,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	manager.newProcess = func(command Command, _ io.Writer) process {
+		return &fakeProcess{playlistPath: command.Args[len(command.Args)-1], stopped: make(chan struct{})}
+	}
+	cleanupStarted := make(chan struct{})
+	allowCleanup := make(chan struct{})
+	manager.removeAll = func(path string) error {
+		close(cleanupStarted)
+		<-allowCleanup
+		return os.RemoveAll(path)
+	}
+	defer close(allowCleanup)
+
+	session, err := manager.Start(context.Background(), "7.1", "Live News")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopped := make(chan error, 1)
+	go func() { stopped <- manager.Stop(context.Background(), session.ID) }()
+	select {
+	case <-cleanupStarted:
+	case <-time.After(time.Second):
+		t.Fatal("live buffer cleanup did not start")
+	}
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stopping live TV waited for buffer cleanup")
+	}
+	if used, total := pool.Usage(); used != 0 || total != 1 {
+		t.Fatalf("unexpected tuner usage after stop: %d of %d", used, total)
+	}
+}
+
 func TestRecordingFolderUsesTitleAndLocalAiringTime(t *testing.T) {
 	recording := model.Recording{
 		Title: "The Matrix!", ProgramStart: time.Date(2026, 9, 10, 18, 0, 0, 0, time.Local),

@@ -1,7 +1,17 @@
 import Hls from 'hls.js'
 import { useEffect, useRef, useState } from 'react'
+import { castPlaylist, getCastContext } from './cast'
 
-type Props = { src: string; title: string; startAt?: number; onProgress?: (seconds: number) => void; onClose: () => void }
+type Props = {
+  src: string
+  playlistPath: string
+  title: string
+  startAt?: number
+  liveSessionId?: string
+  onProgress?: (seconds: number) => void
+  onCastingChange?: (casting: boolean) => void
+  onClose: () => void
+}
 type MediaRange = { start: number; end: number }
 
 function isSafari() {
@@ -23,16 +33,24 @@ function formatOffset(seconds: number) {
   return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}` : `${minutes}:${String(remainder).padStart(2, '0')}`
 }
 
-export function HlsPlayer({ src, title, startAt = 0, onProgress, onClose }: Props) {
+export function HlsPlayer({ src, playlistPath, title, startAt = 0, liveSessionId, onProgress, onCastingChange, onClose }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const timelineRef = useRef<MediaRange | null>(null)
   const usesHlsRef = useRef(false)
   const progressRef = useRef(onProgress)
   const positionRef = useRef(0)
   const lastReportedRef = useRef(-1)
+  const castContextRef = useRef<any>(undefined)
+  const castMediaRef = useRef<any>(undefined)
+  const removeCastListenerRef = useRef<(() => void) | undefined>(undefined)
+  const removeMediaListenerRef = useRef<(() => void) | undefined>(undefined)
   const [range, setRange] = useState<MediaRange | null>(null)
   const [position, setPosition] = useState(0)
   const [playbackError, setPlaybackError] = useState('')
+  const [casting, setCasting] = useState(false)
+  const [castBusy, setCastBusy] = useState(false)
+  const [castError, setCastError] = useState('')
+  const [remotePlaying, setRemotePlaying] = useState(true)
 
   progressRef.current = onProgress
 
@@ -59,10 +77,21 @@ export function HlsPlayer({ src, title, startAt = 0, onProgress, onClose }: Prop
 
   function seekTo(target: number, play = false) {
     const video = videoRef.current
-    if (!video) return false
-    const bounds = timelineRef.current ?? mediaRange(video)
+    const bounds = timelineRef.current ?? (video ? mediaRange(video) : null)
     if (!bounds) return false
     const clamped = Math.max(bounds.start, Math.min(target, Math.max(bounds.start, bounds.end - 0.1)))
+    if (casting && castMediaRef.current) {
+      const cast = (window as any).chrome?.cast
+      if (!cast) return false
+      const request = new cast.media.SeekRequest()
+      request.currentTime = clamped
+      castMediaRef.current.seek(request)
+      setPosition(Math.max(0, clamped - bounds.start))
+      reportProgress(Math.max(0, clamped - bounds.start))
+      if (play) playRemote()
+      return true
+    }
+    if (!video) return false
     video.currentTime = clamped
     updateTimeline(video)
     if (play) void video.play()
@@ -152,10 +181,11 @@ export function HlsPlayer({ src, title, startAt = 0, onProgress, onClose }: Prop
 
   function jump(seconds: number) {
     const video = videoRef.current
-    if (!video) return
     const bounds = timelineRef.current
     if (!bounds) return
-    seekTo(video.currentTime + seconds)
+    const current = casting ? bounds.start + positionRef.current : video?.currentTime
+    if (current === undefined) return
+    seekTo(current + seconds)
   }
 
   function goLive() {
@@ -163,22 +193,126 @@ export function HlsPlayer({ src, title, startAt = 0, onProgress, onClose }: Prop
     if (bounds) seekTo(bounds.end - 1, true)
   }
 
+  function playRemote() {
+    const cast = (window as any).chrome?.cast
+    if (!cast || !castMediaRef.current) return
+    castMediaRef.current.play(new cast.media.PlayRequest())
+    setRemotePlaying(true)
+  }
+
+  function pauseRemote() {
+    const cast = (window as any).chrome?.cast
+    if (!cast || !castMediaRef.current) return
+    castMediaRef.current.pause(new cast.media.PauseRequest())
+    setRemotePlaying(false)
+  }
+
+  function togglePlayback() {
+    if (casting) {
+      if (remotePlaying) pauseRemote()
+      else playRemote()
+      return
+    }
+    const video = videoRef.current
+    if (!video) return
+    if (video.paused) void video.play()
+    else video.pause()
+  }
+
+  function clearCasting() {
+    removeCastListenerRef.current?.()
+    removeCastListenerRef.current = undefined
+    removeMediaListenerRef.current?.()
+    removeMediaListenerRef.current = undefined
+    castMediaRef.current = undefined
+    setCasting(false)
+    setRemotePlaying(true)
+    onCastingChange?.(false)
+  }
+
+  async function startCasting() {
+    setCastBusy(true)
+    setCastError('')
+    try {
+      const media = await castPlaylist({ playlistPath, liveSessionId, title, startAt: positionRef.current })
+      const context = await getCastContext()
+      castContextRef.current = context
+      castMediaRef.current = media
+      const updateMedia = (alive: boolean) => {
+        if (!alive) return
+        const next = Number(media.currentTime)
+        if (Number.isFinite(next)) {
+          const bounds = timelineRef.current
+          const offset = bounds ? Math.max(0, next - bounds.start) : Math.max(0, next)
+          setPosition(offset)
+          reportProgress(offset)
+        }
+        setRemotePlaying(media.playerState !== (window as any).chrome?.cast?.media?.PlayerState?.PAUSED)
+      }
+      media.addUpdateListener(updateMedia)
+      removeMediaListenerRef.current = () => media.removeUpdateListener(updateMedia)
+      const sessionStateChanged = (event: any) => {
+        if (event.sessionState === (window as any).cast?.framework?.SessionState?.SESSION_ENDED) clearCasting()
+      }
+      context.addEventListener((window as any).cast.framework.CastContextEventType.SESSION_STATE_CHANGED, sessionStateChanged)
+      removeCastListenerRef.current?.()
+      removeCastListenerRef.current = () => context.removeEventListener((window as any).cast.framework.CastContextEventType.SESSION_STATE_CHANGED, sessionStateChanged)
+      videoRef.current?.pause()
+      setCasting(true)
+      onCastingChange?.(true)
+    } catch (error) {
+      setCastError(error instanceof Error ? error.message : 'Could not start Google Cast.')
+    } finally {
+      setCastBusy(false)
+    }
+  }
+
+  async function stopCasting() {
+    setCastBusy(true)
+    try {
+      await castContextRef.current?.endCurrentSession(true)
+    } catch (error) {
+      setCastError(error instanceof Error ? error.message : 'Could not stop Google Cast.')
+    } finally {
+      clearCasting()
+      setCastBusy(false)
+    }
+  }
+
+  function closePlayer() {
+    if (casting) {
+      void stopCasting().finally(onClose)
+      return
+    }
+    onClose()
+  }
+
+  useEffect(() => () => {
+    removeCastListenerRef.current?.()
+    removeMediaListenerRef.current?.()
+    onCastingChange?.(false)
+  }, [onCastingChange])
+
   const recordedDuration = range ? Math.max(0, range.end - range.start) : 0
   const atLive = Boolean(range && range.end - (range.start + position) < 8)
 
   return (
     <div className="player-overlay" role="dialog" aria-modal="true" aria-label={`Playing ${title}`}>
       <div className="player-shell">
-        <div className="player-heading"><div><span className="eyebrow">Now playing</span><h2>{title}</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close player">×</button></div>
-        <video ref={videoRef} controls playsInline preload="auto" onTimeUpdate={(event) => updateTimeline(event.currentTarget)} onSeeking={(event) => updateTimeline(event.currentTarget)} />
+        <div className="player-heading"><div><span className="eyebrow">Now playing</span><h2>{title}</h2></div><button type="button" className="icon-button" onClick={closePlayer} aria-label="Close player">×</button></div>
+        <video ref={videoRef} className={casting ? 'cast-source' : ''} controls={!casting} playsInline preload="auto" onTimeUpdate={(event) => updateTimeline(event.currentTarget)} onSeeking={(event) => updateTimeline(event.currentTarget)} />
+        {casting && <div className="cast-status"><span aria-hidden="true">▣</span><div><strong>Casting to your TV</strong><p>Playback controls stay here in CatchUp.</p></div><button type="button" className="subtle" disabled={castBusy} onClick={() => void stopCasting()}>{castBusy ? 'Stopping…' : 'Stop casting'}</button></div>}
         <div className="playback-position" aria-live="off">{range ? `${formatOffset(position)} of ${formatOffset(recordedDuration)} recorded` : 'Preparing recorded timeline…'}</div>
         {playbackError && <div className="player-error" role="alert">{playbackError}</div>}
+        {castError && <div className="player-error" role="alert">{castError}</div>}
         <div className="transport" aria-label="Playback jumps">
+          <button type="button" disabled={casting ? !castMediaRef.current : false} onClick={togglePlayback}>{casting ? (remotePlaying ? 'Pause' : 'Play') : 'Play / Pause'}</button>
           <button type="button" disabled={!range} onClick={() => startOver()}>Start Over</button>
           <button type="button" disabled={!range} onClick={() => jump(-10)}>−10</button>
           <button type="button" disabled={!range} onClick={() => jump(30)}>+30</button>
           <button type="button" disabled={!range} onClick={() => jump(60)}>+60</button>
           <button type="button" disabled={!range} className={atLive ? 'live active' : 'live'} onClick={goLive}><span />Go Live</button>
+          {!casting && <button type="button" className="cast-button" disabled={castBusy} onClick={() => void startCasting()}>{castBusy ? 'Connecting…' : 'Cast to TV'}</button>}
         </div>
       </div>
     </div>

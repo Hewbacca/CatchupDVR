@@ -10,10 +10,10 @@ import type { Diagnostics, Guide, Program, Recording } from './types'
 
 type View = 'guide' | 'recordings'
 type Toast = { tone: 'success' | 'error'; message: string }
-type Playback = { src: string; title: string; startAt: number; recordingId?: number; liveSessionId?: string }
+type Playback = { src: string; playlistPath: string; title: string; startAt: number; recordingId?: number; liveSessionId?: string }
 
 const HlsPlayer = lazy(() => import('./HlsPlayer').then((module) => ({ default: module.HlsPlayer })))
-const APP_VERSION = '1.16'
+const APP_VERSION = '1.17'
 
 function floorHalfHour(date: Date) {
   const result = new Date(date)
@@ -64,6 +64,7 @@ export default function App() {
   const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null)
   const [selected, setSelected] = useState<Program | null>(null)
   const [playing, setPlaying] = useState<Playback | null>(null)
+  const [casting, setCasting] = useState(false)
   const [resumePositions, setResumePositions] = useState(readResumePositions)
   const [liveStarting, setLiveStarting] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<Set<number>>(() => new Set())
@@ -159,12 +160,14 @@ export default function App() {
   }, [toast])
 
   useEffect(() => {
-    if (!playing?.liveSessionId) return
+    // A Chromecast keeps reading the temporary HLS buffer without the browser.
+    // Its server-side Cast lease will stop it after media reads cease.
+    if (!playing?.liveSessionId || casting) return
     const sessionId = playing.liveSessionId
     const cleanup = () => { void stopLive(sessionId, true) }
     window.addEventListener('pagehide', cleanup)
     return () => window.removeEventListener('pagehide', cleanup)
-  }, [playing?.liveSessionId])
+  }, [casting, playing?.liveSessionId])
 
   const scheduled = useMemo(() => new Set(recordings.filter((recording) => recording.status === 'scheduled' || recording.status === 'recording').map((recording) => recording.programId)), [recordings])
   const favoriteGuideChannels = useMemo(() => guide?.channels.filter((channel) => favoriteChannels.has(channel.id)) ?? [], [favoriteChannels, guide])
@@ -222,7 +225,7 @@ export default function App() {
     try {
       const session = await startLive(program.channel.number, program.title)
       setSelected(null)
-      setPlaying({ src: `/recordings/${session.playlistPath}`, title: session.title || program.title, startAt: 0, liveSessionId: session.id })
+      setPlaying({ src: `/recordings/${session.playlistPath}`, playlistPath: session.playlistPath, title: session.title || program.title, startAt: 0, liveSessionId: session.id })
       void getDiagnostics().then(setDiagnostics).catch(() => undefined)
     } catch (error) {
       setToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not start live TV' })
@@ -234,6 +237,7 @@ export default function App() {
   function closePlayer() {
     const sessionId = playing?.liveSessionId
     setPlaying(null)
+    setCasting(false)
     if (sessionId) {
       void stopLive(sessionId).then(() => getDiagnostics().then(setDiagnostics)).catch((error) => {
         setToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not stop live TV' })
@@ -381,7 +385,7 @@ export default function App() {
                 <div className={`status-art ${recording.status}`}><span>{recording.status === 'recording' ? 'REC' : recording.channelNumber}</span></div>
                 <div className="recording-info"><span className="status-label">{recording.status}</span><h2>{recording.title}</h2><p>{when(recording.programStart, recording.programEnd)} · Channel {recording.channelNumber}</p>{recording.errorMessage && <p className="recording-error">{recording.errorMessage}</p>}</div>
                 <div className="recording-actions">
-                  {recording.playlistPath && <button className="primary" onClick={() => setPlaying({ src: `/recordings/${recording.playlistPath}`, title: recording.title, startAt: resumePositions[String(recording.id)] ?? 0, recordingId: recording.id })}>{(resumePositions[String(recording.id)] ?? 0) >= 2 ? 'Resume' : recording.status === 'recording' ? 'Watch from start' : 'Play'}</button>}
+                  {recording.playlistPath && <button className="primary" onClick={() => setPlaying({ src: `/recordings/${recording.playlistPath}`, playlistPath: recording.playlistPath!, title: recording.title, startAt: resumePositions[String(recording.id)] ?? 0, recordingId: recording.id })}>{(resumePositions[String(recording.id)] ?? 0) >= 2 ? 'Resume' : recording.status === 'recording' ? 'Watch from start' : 'Play'}</button>}
                   <button className="subtle danger" disabled={deleting.has(recording.id)} onClick={() => void deleteJob(recording)}>{deleting.has(recording.id) ? 'Stopping…' : recording.status === 'recording' ? 'Stop & Delete' : 'Delete'}</button>
                 </div>
               </article>
@@ -410,7 +414,7 @@ export default function App() {
 
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} onPasswordChanged={() => setToast({ tone: 'success', message: 'Password changed. Other browsers have been signed out.' })} />}
 
-      {playing && <Suspense fallback={null}><HlsPlayer src={playing.src} title={playing.title} startAt={playing.startAt} onProgress={playing.recordingId ? (seconds) => rememberPosition(playing.recordingId!, seconds) : undefined} onClose={closePlayer} /></Suspense>}
+      {playing && <Suspense fallback={null}><HlsPlayer src={playing.src} playlistPath={playing.playlistPath} title={playing.title} startAt={playing.startAt} liveSessionId={playing.liveSessionId} onCastingChange={setCasting} onProgress={playing.recordingId ? (seconds) => rememberPosition(playing.recordingId!, seconds) : undefined} onClose={closePlayer} /></Suspense>}
       {toast && <div className={`toast ${toast.tone}`} role="status">{toast.message}</div>}
     </div>
   )
