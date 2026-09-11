@@ -10,9 +10,13 @@ CatchUp DVR is a subscription-free, self-hosted DVR for an HDHomeRun. It imports
 - Responsive React/TypeScript guide and recording library
 - One-click recording with pre/post padding and two-tuner conflict detection
 - HLS playback controls for start-over, pause, -10, +30, +60, and Go Live
+- Per-browser resume positions for recordings that have been watched
+- Rewindable live TV from the guide, backed by temporary buffers that are removed when the player closes
+- Live tuner availability with scheduled recordings taking priority over temporary live-TV sessions
 - Intel VA-API render-device detection and deterministic FFmpeg HLS EVENT command construction
 - Supervised FFmpeg recording with live status, graceful playlist finalization, and restart recovery
 - Watch-from-start playback while a recording is still in progress
+- Human-readable recording folders such as `the-matrix-09-10-2026-0600pm`
 - Podman deployment definition with host networking and `/dev/dri` passthrough
 
 Real tuner, GPU, and long-running chase-play validation must be performed on the Linux server; see [Real-server validation](docs/REAL_SERVER_VALIDATION.md).

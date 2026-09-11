@@ -32,6 +32,7 @@ type SupervisorConfig struct {
 	HDHomeRunIP   string
 	RecordingsDir string
 	Profile       Profile
+	Pool          *TunerPool
 	PollInterval  time.Duration
 	Heartbeat     time.Duration
 }
@@ -76,6 +77,9 @@ func NewSupervisor(repository Repository, config SupervisorConfig, logger *slog.
 	}
 	if config.Heartbeat <= 0 {
 		config.Heartbeat = 10 * time.Second
+	}
+	if config.Pool == nil {
+		config.Pool = NewTunerPool(1)
 	}
 	return &Supervisor{
 		repository: repository,
@@ -160,7 +164,7 @@ func (s *Supervisor) Delete(ctx context.Context, id int64) error {
 			return ctx.Err()
 		}
 	}
-	if err := os.RemoveAll(filepath.Join(s.config.RecordingsDir, fmt.Sprintf("%d", recording.ID))); err != nil {
+	if err := os.RemoveAll(recordingOutputDir(s.config.RecordingsDir, recording)); err != nil {
 		return fmt.Errorf("remove recording files: %w", err)
 	}
 	return s.repository.DeleteRecording(ctx, id)
@@ -192,17 +196,37 @@ func (s *Supervisor) recoverInterrupted(ctx context.Context) {
 }
 
 func (s *Supervisor) capture(ctx context.Context, recording model.Recording) {
+	reservationKey := fmt.Sprintf("recording:%d", recording.ID)
+	if !s.config.Pool.AcquireRecording(ctx, reservationKey) {
+		if errors.Is(context.Cause(ctx), ErrRecordingDeleted) {
+			return
+		}
+		if ctx.Err() != nil {
+			persistCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = s.repository.RequeueRecording(persistCtx, recording.ID, "paused during service shutdown")
+			cancel()
+			return
+		}
+		s.finish(recording.ID, "failed", "no tuner was available when recording started")
+		return
+	}
+	defer s.config.Pool.Release(reservationKey)
 	inputURL, err := HDHomeRunStreamURL(s.config.HDHomeRunIP, recording.ChannelNumber)
 	if err != nil {
 		s.finish(recording.ID, "failed", err.Error())
 		return
 	}
-	outputDir := filepath.Join(s.config.RecordingsDir, fmt.Sprintf("%d", recording.ID))
+	outputDir := recordingOutputDir(s.config.RecordingsDir, recording)
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		s.finish(recording.ID, "failed", "create recording directory: "+err.Error())
 		return
 	}
-	playlistPath := filepath.Join(fmt.Sprintf("%d", recording.ID), "index.m3u8")
+	playlistPath, err := filepath.Rel(s.config.RecordingsDir, filepath.Join(outputDir, "index.m3u8"))
+	if err != nil {
+		s.finish(recording.ID, "failed", "create recording path: "+err.Error())
+		return
+	}
+	playlistPath = filepath.ToSlash(playlistPath)
 	command := BuildCommand(s.config.Profile, inputURL, outputDir)
 	output := &limitedBuffer{limit: 16 * 1024}
 	process := s.newProcess(command, output)
@@ -315,7 +339,7 @@ func (s *Supervisor) absolutePlaylist(recording model.Recording) string {
 	if recording.PlaylistPath != "" {
 		return filepath.Join(s.config.RecordingsDir, filepath.FromSlash(recording.PlaylistPath))
 	}
-	return filepath.Join(s.config.RecordingsDir, fmt.Sprintf("%d", recording.ID), "index.m3u8")
+	return filepath.Join(recordingOutputDir(s.config.RecordingsDir, recording), "index.m3u8")
 }
 
 // FinalizePlaylist makes an interrupted HLS EVENT recording a finite, playable asset.

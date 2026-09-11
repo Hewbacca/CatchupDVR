@@ -1,4 +1,4 @@
-import type { Diagnostics, Guide, Recording } from './types'
+import type { Diagnostics, Guide, LiveSession, Recording } from './types'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init)
@@ -15,6 +15,20 @@ export function getGuide(from: Date, to: Date) {
 export function getRecordings() { return request<Recording[]>('/api/recordings') }
 export function getDiagnostics() { return request<Diagnostics>('/api/diagnostics') }
 
+export function startLive(channelNumber: string, title: string) {
+  return request<LiveSession>('/api/live', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channelNumber, title }),
+  })
+}
+
+export async function stopLive(id: string, keepalive = false) {
+  const response = await fetch(`/api/live/${encodeURIComponent(id)}`, { method: 'DELETE', keepalive })
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw new Error(body.error || 'Could not stop live TV')
+  }
+}
+
 export function schedule(programId: string) {
   return request<Recording>('/api/recordings', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ programId }),
@@ -28,4 +42,3 @@ export async function removeRecording(id: number) {
     throw new Error(body.error || 'Could not delete recording')
   }
 }
-

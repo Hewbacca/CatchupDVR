@@ -33,16 +33,27 @@ type RecordingController interface {
 	Delete(context.Context, int64) error
 }
 
+type LiveController interface {
+	Start(context.Context, string, string) (recording.LiveSession, error)
+	Stop(context.Context, string) error
+}
+
+type TunerCounter interface {
+	Usage() (int, int)
+}
+
 type Server struct {
 	config   config.Config
 	store    Store
 	refresh  guide.RefreshService
 	logger   *slog.Logger
 	recorder RecordingController
+	live     LiveController
+	tuners   TunerCounter
 }
 
-func New(cfg config.Config, store Store, refresh guide.RefreshService, recorder RecordingController, logger *slog.Logger) http.Handler {
-	server := &Server{config: cfg, store: store, refresh: refresh, recorder: recorder, logger: logger}
+func New(cfg config.Config, store Store, refresh guide.RefreshService, recorder RecordingController, live LiveController, tuners TunerCounter, logger *slog.Logger) http.Handler {
+	server := &Server{config: cfg, store: store, refresh: refresh, recorder: recorder, live: live, tuners: tuners, logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", server.health)
 	mux.HandleFunc("GET /api/diagnostics", server.diagnostics)
@@ -51,6 +62,8 @@ func New(cfg config.Config, store Store, refresh guide.RefreshService, recorder 
 	mux.HandleFunc("GET /api/recordings", server.getRecordings)
 	mux.HandleFunc("POST /api/recordings", server.createRecording)
 	mux.HandleFunc("DELETE /api/recordings/{id}", server.deleteRecording)
+	mux.HandleFunc("POST /api/live", server.startLive)
+	mux.HandleFunc("DELETE /api/live/{id}", server.stopLive)
 	mux.Handle("/recordings/", http.StripPrefix("/recordings/", noCacheHLS(http.FileServer(http.Dir(cfg.RecordingsDir)))))
 	if info, err := os.Stat(cfg.WebDir); err == nil && info.IsDir() {
 		mux.Handle("/", spaHandler(cfg.WebDir))
@@ -68,8 +81,9 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) diagnostics(w http.ResponseWriter, r *http.Request) {
 	device, deviceErr := recording.DetectRenderDevice("/dev/dri", "/sys/class/drm", s.config.GPURenderDevice)
+	tunersInUse, tunerCount := s.tuners.Usage()
 	response := map[string]any{
-		"database": "ok", "tunerCount": s.config.TunerCount, "hdHomeRunConfigured": s.config.HDHomeRunIP != "",
+		"database": "ok", "tunerCount": tunerCount, "tunersInUse": tunersInUse, "tunersAvailable": max(0, tunerCount-tunersInUse), "hdHomeRunConfigured": s.config.HDHomeRunIP != "",
 		"recordingsDir": s.config.RecordingsDir, "gpuMode": s.config.GPUMode, "renderDevice": device,
 		"recordingEngine": "enabled",
 	}
@@ -163,6 +177,35 @@ func (s *Server) deleteRecording(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.recorder.Delete(r.Context(), id); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) startLive(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		ChannelNumber string `json:"channelNumber"`
+		Title         string `json:"title"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil || strings.TrimSpace(request.ChannelNumber) == "" {
+		writeError(w, http.StatusBadRequest, "channelNumber is required")
+		return
+	}
+	session, err := s.live.Start(r.Context(), request.ChannelNumber, request.Title)
+	if errors.Is(err, recording.ErrNoTuners) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, session)
+}
+
+func (s *Server) stopLive(w http.ResponseWriter, r *http.Request) {
+	if err := s.live.Stop(r.Context(), r.PathValue("id")); err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}

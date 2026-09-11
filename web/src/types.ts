@@ -42,10 +42,19 @@ export type Recording = {
 export type Diagnostics = {
   database: string
   tunerCount: number
+  tunersInUse: number
+  tunersAvailable: number
   hdHomeRunConfigured: boolean
   recordingsDir: string
   gpuMode: string
   renderDevice: string
   gpuWarning?: string
   recordingEngine: string
+}
+
+export type LiveSession = {
+  id: string
+  channelNumber: string
+  title: string
+  playlistPath: string
 }

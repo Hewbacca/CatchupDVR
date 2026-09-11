@@ -17,7 +17,7 @@ HDHomeRun ── MPEG-TS ──> FFmpeg worker ──> append-only HLS EVENT dir
 - `cmd/catchupd`: composition root, configuration, schema migration, HTTP server.
 - `internal/guide`: XMLTV download and parsing. HDHomeRun mode fetches `/discover.json` before every XMLTV request so rotating authorization is never cached. Successful XML is atomically retained as the last-good guide.
 - `internal/store`: SQLite persistence and overlap-aware two-tuner reservation.
-- `internal/recording`: GPU discovery and FFmpeg argument construction. The output is an HLS EVENT playlist with four-second independent segments. The scheduler and supervised process lifecycle will use this boundary next.
+- `internal/recording`: GPU discovery, FFmpeg argument construction, supervised recording, temporary live-TV buffers, and shared tuner allocation. Output uses HLS EVENT playlists with four-second independent segments.
 - `internal/httpapi`: JSON API plus production PWA/static and recording-file serving.
 - `web`: React/TypeScript PWA. Safari uses its native HLS support; other browsers use hls.js.
 
@@ -40,7 +40,9 @@ Exceptional terminal states are `conflict`, `failed`, and `cancelled`. Pre/post 
 
 ## Tuner allocation
 
-The store checks padded intervals and rejects a new job when two accepted jobs already overlap it. This immediate feedback is backed by a transaction; the runtime scheduler will re-check allocation when a job starts because recordings can be extended. Live extension has priority over a lower-priority future job only after explicit conflict presentation.
+The store checks padded intervals and rejects a new job when two accepted jobs already overlap it. A shared runtime pool accounts for both scheduled recordings and temporary live-TV sessions. Scheduled recordings take priority: when every tuner is occupied, a due recording stops one temporary live buffer, waits for its FFmpeg process to release the tuner, and then begins capture.
+
+Live TV uses the same append-only HLS pipeline under a hidden `.live` directory. These sessions never create database recording rows, are deleted when the player closes, and also expire after six hours as a safety net.
 
 ## GPU selection
 

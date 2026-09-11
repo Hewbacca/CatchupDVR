@@ -38,7 +38,8 @@ func TestFinalizePlaylistAddsEndListOnce(t *testing.T) {
 func TestSupervisorCapturesAndCompletesDueRecording(t *testing.T) {
 	now := time.Now().UTC()
 	repository := &fakeRepository{finished: make(chan finishResult, 1), due: &model.Recording{
-		ID: 7, ChannelNumber: "7.1", Status: "scheduled",
+		ID: 7, ChannelNumber: "7.1", Title: "The Matrix", Status: "scheduled",
+		ProgramStart:   time.Date(2026, 9, 10, 18, 0, 0, 0, time.Local),
 		ScheduledStart: now.Add(-time.Minute), ScheduledEnd: now.Add(40 * time.Millisecond),
 	}}
 	supervisor := NewSupervisor(repository, SupervisorConfig{
@@ -65,7 +66,7 @@ func TestSupervisorCapturesAndCompletesDueRecording(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("supervisor did not stop")
 	}
-	if repository.playlist != "7/index.m3u8" || repository.pid != 4321 {
+	if repository.playlist != "the-matrix-09-10-2026-0600pm/index.m3u8" || repository.pid != 4321 {
 		t.Fatalf("runtime metadata not persisted: path=%q pid=%d", repository.playlist, repository.pid)
 	}
 }
@@ -73,7 +74,8 @@ func TestSupervisorCapturesAndCompletesDueRecording(t *testing.T) {
 func TestDeleteStopsActiveRecordingAndRemovesOutput(t *testing.T) {
 	now := time.Now().UTC()
 	repository := &fakeRepository{started: make(chan struct{}, 1), finished: make(chan finishResult, 1), due: &model.Recording{
-		ID: 9, ChannelNumber: "9.1", Status: "scheduled",
+		ID: 9, ChannelNumber: "9.1", Title: "Delete Me", Status: "scheduled",
+		ProgramStart:   time.Date(2026, 9, 10, 19, 30, 0, 0, time.Local),
 		ScheduledStart: now.Add(-time.Minute), ScheduledEnd: now.Add(time.Hour),
 	}}
 	root := t.TempDir()
@@ -98,7 +100,7 @@ func TestDeleteStopsActiveRecordingAndRemovesOutput(t *testing.T) {
 	if !repository.deleted {
 		t.Fatal("recording row was not deleted")
 	}
-	if _, err := os.Stat(filepath.Join(root, "9")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, "delete-me-09-10-2026-0730pm")); !os.IsNotExist(err) {
 		t.Fatalf("recording output still exists: %v", err)
 	}
 	stop()
@@ -154,7 +156,7 @@ func (r *fakeRepository) FinishRecording(_ context.Context, _ int64, status, mes
 func (r *fakeRepository) RequeueRecording(context.Context, int64, string) error { return nil }
 
 func (r *fakeRepository) CancelRecording(_ context.Context, id int64, _ time.Time) (model.Recording, error) {
-	return model.Recording{ID: id, Status: "cancelled"}, nil
+	return model.Recording{ID: id, Status: "cancelled", PlaylistPath: r.playlist}, nil
 }
 
 func (r *fakeRepository) DeleteRecording(context.Context, int64) error {

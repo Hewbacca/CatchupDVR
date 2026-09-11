@@ -1,13 +1,15 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
-import { getDiagnostics, getGuide, getRecordings, removeRecording, schedule } from './api'
+import { getDiagnostics, getGuide, getRecordings, removeRecording, schedule, startLive, stopLive } from './api'
 import { GuideGrid } from './GuideGrid'
+import { readResumePositions, writeResumePositions } from './resume'
 import type { Diagnostics, Guide, Program, Recording } from './types'
 
 type View = 'guide' | 'recordings'
 type Toast = { tone: 'success' | 'error'; message: string }
+type Playback = { src: string; title: string; startAt: number; recordingId?: number; liveSessionId?: string }
 
 const HlsPlayer = lazy(() => import('./HlsPlayer').then((module) => ({ default: module.HlsPlayer })))
-const APP_VERSION = '1.10'
+const APP_VERSION = '1.11'
 
 function floorHalfHour(date: Date) {
   const result = new Date(date)
@@ -30,7 +32,9 @@ export default function App() {
   const [recordings, setRecordings] = useState<Recording[]>([])
   const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null)
   const [selected, setSelected] = useState<Program | null>(null)
-  const [playing, setPlaying] = useState<Recording | null>(null)
+  const [playing, setPlaying] = useState<Playback | null>(null)
+  const [resumePositions, setResumePositions] = useState(readResumePositions)
+  const [liveStarting, setLiveStarting] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<Set<number>>(() => new Set())
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState<Toast | null>(null)
@@ -46,6 +50,19 @@ export default function App() {
   }, [from, to])
 
   useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    let active = true
+    const refresh = async () => {
+      try {
+        const next = await getDiagnostics()
+        if (active) setDiagnostics(next)
+      } catch {
+        if (active) setDiagnostics(null)
+      }
+    }
+    const timer = window.setInterval(() => void refresh(), 5000)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [])
   useEffect(() => {
     if (view !== 'recordings') return
     let active = true
@@ -67,6 +84,14 @@ export default function App() {
     return () => window.clearTimeout(timer)
   }, [toast])
 
+  useEffect(() => {
+    if (!playing?.liveSessionId) return
+    const sessionId = playing.liveSessionId
+    const cleanup = () => { void stopLive(sessionId, true) }
+    window.addEventListener('pagehide', cleanup)
+    return () => window.removeEventListener('pagehide', cleanup)
+  }, [playing?.liveSessionId])
+
   const scheduled = useMemo(() => new Set(recordings.filter((recording) => recording.status === 'scheduled' || recording.status === 'recording').map((recording) => recording.programId)), [recordings])
 
   const record = useCallback(async (program: Program) => {
@@ -80,6 +105,40 @@ export default function App() {
       throw error
     }
   }, [])
+
+  const rememberPosition = useCallback((recordingId: number, seconds: number) => {
+    if (seconds < 2) return
+    setResumePositions((current) => {
+      if (Math.abs((current[String(recordingId)] ?? 0) - seconds) < 1) return current
+      const next = { ...current, [String(recordingId)]: seconds }
+      writeResumePositions(next)
+      return next
+    })
+  }, [])
+
+  async function watchLive(program: Program) {
+    setLiveStarting(program.id)
+    try {
+      const session = await startLive(program.channel.number, program.title)
+      setSelected(null)
+      setPlaying({ src: `/recordings/${session.playlistPath}`, title: session.title || program.title, startAt: 0, liveSessionId: session.id })
+      void getDiagnostics().then(setDiagnostics).catch(() => undefined)
+    } catch (error) {
+      setToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not start live TV' })
+    } finally {
+      setLiveStarting(null)
+    }
+  }
+
+  function closePlayer() {
+    const sessionId = playing?.liveSessionId
+    setPlaying(null)
+    if (sessionId) {
+      void stopLive(sessionId).then(() => getDiagnostics().then(setDiagnostics)).catch((error) => {
+        setToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not stop live TV' })
+      })
+    }
+  }
 
   useEffect(() => {
     const context = document.modelContext
@@ -115,7 +174,14 @@ export default function App() {
     try {
       await removeRecording(recording.id)
       setRecordings((current) => current.filter((item) => item.id !== recording.id))
-      if (playing?.id === recording.id) setPlaying(null)
+      if (playing?.recordingId === recording.id) setPlaying(null)
+      setResumePositions((current) => {
+        if (!(String(recording.id) in current)) return current
+        const next = { ...current }
+        delete next[String(recording.id)]
+        writeResumePositions(next)
+        return next
+      })
       setToast({ tone: 'success', message: `${recording.title} removed` })
     } catch (error) {
       setToast({ tone: 'error', message: error instanceof Error ? error.message : 'Could not remove recording' })
@@ -129,6 +195,10 @@ export default function App() {
   }
 
   const titleDate = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'short', day: 'numeric' }).format(from)
+  const inferredUsed = recordings.filter((recording) => recording.status === 'recording').length + (playing?.liveSessionId ? 1 : 0)
+  const tunerCount = diagnostics?.tunerCount ?? 0
+  const tunersInUse = diagnostics?.tunersInUse ?? Math.min(tunerCount, inferredUsed)
+  const tunersAvailable = diagnostics?.tunersAvailable ?? Math.max(0, tunerCount - tunersInUse)
 
   return (
     <div className="app-shell">
@@ -138,7 +208,10 @@ export default function App() {
           <button className={view === 'guide' ? 'active' : ''} onClick={() => setView('guide')}>Guide</button>
           <button className={view === 'recordings' ? 'active' : ''} onClick={() => setView('recordings')}>Recordings <span className="count">{recordings.length}</span></button>
         </nav>
-        <div className="system-status" title={diagnostics?.gpuWarning || 'System diagnostics'}><i className={diagnostics ? 'online' : ''} />{diagnostics ? `${diagnostics.tunerCount} tuners` : 'Offline'}</div>
+        <div className="system-status" title={diagnostics?.gpuWarning || (diagnostics ? `${tunersInUse} tuners in use` : 'System offline')}>
+          <span className="tuner-lights" aria-hidden="true">{Array.from({ length: tunerCount }, (_, index) => <i key={index} className={index < tunersInUse ? 'busy' : 'online'} />)}</span>
+          {diagnostics ? `${tunersAvailable} of ${tunerCount} free` : 'Offline'}
+        </div>
       </header>
 
       <main>
@@ -164,7 +237,7 @@ export default function App() {
                 <div className={`status-art ${recording.status}`}><span>{recording.status === 'recording' ? 'REC' : recording.channelNumber}</span></div>
                 <div className="recording-info"><span className="status-label">{recording.status}</span><h2>{recording.title}</h2><p>{when(recording.programStart, recording.programEnd)} · Channel {recording.channelNumber}</p>{recording.errorMessage && <p className="recording-error">{recording.errorMessage}</p>}</div>
                 <div className="recording-actions">
-                  {recording.playlistPath && <button className="primary" onClick={() => setPlaying(recording)}>{recording.status === 'recording' ? 'Watch from start' : 'Play'}</button>}
+                  {recording.playlistPath && <button className="primary" onClick={() => setPlaying({ src: `/recordings/${recording.playlistPath}`, title: recording.title, startAt: resumePositions[String(recording.id)] ?? 0, recordingId: recording.id })}>{(resumePositions[String(recording.id)] ?? 0) >= 2 ? 'Resume' : recording.status === 'recording' ? 'Watch from start' : 'Play'}</button>}
                   <button className="subtle danger" disabled={deleting.has(recording.id)} onClick={() => void deleteJob(recording)}>{deleting.has(recording.id) ? 'Stopping…' : recording.status === 'recording' ? 'Stop & Delete' : 'Delete'}</button>
                 </div>
               </article>
@@ -183,12 +256,15 @@ export default function App() {
           {selected.subtitle && <h3>{selected.subtitle}</h3>}
           <p className="program-time">{when(selected.start, selected.end)}</p>
           <p className="description">{selected.description || 'No description is available.'}</p>
-          <div className="padding-note">Includes 2 min before and 5 min after</div>
-          <button className="primary record-button" disabled={scheduled.has(selected.id)} onClick={() => void record(selected)}><span className="record-icon" />{scheduled.has(selected.id) ? 'Scheduled' : 'Record this program'}</button>
+          <div className="padding-note">Recordings include 2 min before and 5 min after</div>
+          <div className="details-actions">
+            <button className="primary live-button" disabled={liveStarting === selected.id} onClick={() => void watchLive(selected)}>{liveStarting === selected.id ? 'Starting live TV…' : 'Watch Live'}</button>
+            <button className="subtle record-button" disabled={scheduled.has(selected.id)} onClick={() => void record(selected)}><span className="record-icon" />{scheduled.has(selected.id) ? 'Scheduled' : 'Record this program'}</button>
+          </div>
         </aside>
       </div>}
 
-      {playing?.playlistPath && <Suspense fallback={null}><HlsPlayer src={`/recordings/${playing.playlistPath}`} title={playing.title} onClose={() => setPlaying(null)} /></Suspense>}
+      {playing && <Suspense fallback={null}><HlsPlayer src={playing.src} title={playing.title} startAt={playing.startAt} onProgress={playing.recordingId ? (seconds) => rememberPosition(playing.recordingId!, seconds) : undefined} onClose={closePlayer} /></Suspense>}
       {toast && <div className={`toast ${toast.tone}`} role="status">{toast.message}</div>}
     </div>
   )

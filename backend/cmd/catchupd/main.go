@@ -48,22 +48,28 @@ func main() {
 			logger.Warn("no render device detected; recordings will use software encoding", "error", err)
 		}
 	}
+	profile := recording.Profile{
+		FFmpegPath:   cfg.FFmpegPath,
+		Mode:         cfg.GPUMode,
+		RenderDevice: renderDevice,
+		Deinterlace:  cfg.Deinterlace,
+	}
+	tuners := recording.NewTunerPool(cfg.TunerCount)
 	recorder := recording.NewSupervisor(database, recording.SupervisorConfig{
 		HDHomeRunIP:   cfg.HDHomeRunIP,
 		RecordingsDir: cfg.RecordingsDir,
-		Profile: recording.Profile{
-			FFmpegPath:   cfg.FFmpegPath,
-			Mode:         cfg.GPUMode,
-			RenderDevice: renderDevice,
-			Deinterlace:  cfg.Deinterlace,
-		},
+		Profile:       profile,
+		Pool:          tuners,
+	}, logger)
+	live := recording.NewLiveManager(ctx, recording.LiveConfig{
+		HDHomeRunIP: cfg.HDHomeRunIP, RecordingsDir: cfg.RecordingsDir, Profile: profile, Pool: tuners,
 	}, logger)
 	recorderDone := make(chan struct{})
 	go func() {
 		recorder.Run(ctx)
 		close(recorderDone)
 	}()
-	server := &http.Server{Addr: cfg.HTTPAddr, Handler: httpapi.New(cfg, database, refresh, recorder, logger)}
+	server := &http.Server{Addr: cfg.HTTPAddr, Handler: httpapi.New(cfg, database, refresh, recorder, live, tuners, logger)}
 	logger.Info("CatchUp DVR listening", "address", cfg.HTTPAddr)
 	go func() {
 		<-ctx.Done()
@@ -74,6 +80,7 @@ func main() {
 	serverErr := server.ListenAndServe()
 	stop()
 	<-recorderDone
+	live.Wait()
 	if serverErr != nil && serverErr != http.ErrServerClosed {
 		logger.Error("server stopped", "error", serverErr)
 		os.Exit(1)
