@@ -151,6 +151,11 @@ func (s *Store) ReplaceGuide(ctx context.Context, xmlData []byte) (int, int, err
 			return 0, 0, err
 		}
 	}
+	if _, err = tx.ExecContext(ctx, `UPDATE recordings
+SET channel_number=(SELECT number FROM channels WHERE channels.id=recordings.channel_id)
+WHERE status='scheduled' AND EXISTS (SELECT 1 FROM channels WHERE channels.id=recordings.channel_id)`); err != nil {
+		return 0, 0, err
+	}
 	for _, program := range programs {
 		if _, err = tx.ExecContext(ctx, `INSERT INTO programs(id, channel_id, start_unix, end_unix, title, subtitle, description, category) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
 			program.ID, program.ChannelID, program.Start.Unix(), program.End.Unix(), program.Title, program.Subtitle, program.Description, program.Category); err != nil {

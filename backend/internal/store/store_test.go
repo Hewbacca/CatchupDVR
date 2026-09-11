@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -120,6 +121,35 @@ created_at_unix INTEGER NOT NULL)`)
 	defer upgraded.Close()
 	if _, err := upgraded.Recordings(context.Background()); err != nil {
 		t.Fatalf("read upgraded schema: %v", err)
+	}
+}
+
+func TestGuideRefreshCorrectsChannelNumberForScheduledJobs(t *testing.T) {
+	database, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	badGuide := `<tv><channel id="station"><display-name>KCDODT</display-name></channel>
+<programme start="20260910150000 +0000" stop="20260910160000 +0000" channel="station"><title>Test</title></programme></tv>`
+	if _, _, err := database.ReplaceGuide(context.Background(), []byte(badGuide)); err != nil {
+		t.Fatal(err)
+	}
+	guide, err := database.Guide(context.Background(), time.Date(2026, 9, 10, 14, 0, 0, 0, time.UTC), time.Date(2026, 9, 10, 17, 0, 0, 0, time.UTC))
+	if err != nil || len(guide.Programs) != 1 {
+		t.Fatalf("load guide: %v", err)
+	}
+	job, err := database.Schedule(context.Background(), guide.Programs[0].ID, 0, 0, 2)
+	if err != nil || job.ChannelNumber != "KCDODT" {
+		t.Fatalf("schedule original channel: %#v, %v", job, err)
+	}
+	correctedGuide := strings.Replace(badGuide, "<display-name>KCDODT</display-name>", "<display-name>KCDODT</display-name><display-name>3.1</display-name>", 1)
+	if _, _, err := database.ReplaceGuide(context.Background(), []byte(correctedGuide)); err != nil {
+		t.Fatal(err)
+	}
+	recordings, err := database.Recordings(context.Background())
+	if err != nil || len(recordings) != 1 || recordings[0].ChannelNumber != "3.1" {
+		t.Fatalf("scheduled channel was not corrected: %#v, %v", recordings, err)
 	}
 }
 

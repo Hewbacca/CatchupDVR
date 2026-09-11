@@ -65,7 +65,7 @@ export default function App() {
     return () => window.clearTimeout(timer)
   }, [toast])
 
-  const scheduled = useMemo(() => new Set(recordings.map((recording) => recording.programId)), [recordings])
+  const scheduled = useMemo(() => new Set(recordings.filter((recording) => recording.status === 'scheduled' || recording.status === 'recording').map((recording) => recording.programId)), [recordings])
 
   const record = useCallback(async (program: Program) => {
     try {

@@ -6,10 +6,16 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/Hewbacca/CatchupDVR/backend/internal/model"
+)
+
+var (
+	virtualChannelOnly   = regexp.MustCompile(`^\d+(?:[._-]\d+)?$`)
+	virtualChannelPrefix = regexp.MustCompile(`^(\d+(?:[._-]\d+)?)(?:\s|$)`)
 )
 
 type xmlTV struct {
@@ -83,10 +89,56 @@ func channelNames(raw xmlChannel) (string, string) {
 	if len(raw.DisplayNames) == 0 {
 		return raw.ID, raw.ID
 	}
-	if len(raw.DisplayNames) == 1 {
-		return raw.DisplayNames[0], raw.DisplayNames[0]
+	names := make([]string, 0, len(raw.DisplayNames))
+	for _, value := range raw.DisplayNames {
+		if value = strings.TrimSpace(value); value != "" {
+			names = append(names, value)
+		}
 	}
-	return strings.TrimSpace(raw.DisplayNames[0]), strings.TrimSpace(raw.DisplayNames[len(raw.DisplayNames)-1])
+	if len(names) == 0 {
+		return raw.ID, raw.ID
+	}
+	number := ""
+	for _, value := range names {
+		if virtualChannelOnly.MatchString(value) {
+			number = normalizeVirtualChannel(value)
+			break
+		}
+	}
+	if number == "" {
+		for _, value := range append(names, strings.TrimSpace(raw.ID)) {
+			if match := virtualChannelPrefix.FindStringSubmatch(value); len(match) == 2 {
+				number = normalizeVirtualChannel(match[1])
+				break
+			}
+		}
+	}
+	if number == "" {
+		number = names[0]
+	}
+	name := ""
+	for _, value := range names {
+		if !virtualChannelPrefix.MatchString(value) {
+			name = value
+			break
+		}
+	}
+	if name == "" {
+		for _, value := range names {
+			if normalizeVirtualChannel(value) != number {
+				name = value
+				break
+			}
+		}
+	}
+	if name == "" {
+		name = number
+	}
+	return number, name
+}
+
+func normalizeVirtualChannel(value string) string {
+	return strings.NewReplacer("-", ".", "_", ".").Replace(strings.TrimSpace(value))
 }
 
 func first(values []string) string {
