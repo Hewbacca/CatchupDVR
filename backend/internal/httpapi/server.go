@@ -47,6 +47,7 @@ type RecordingController interface {
 type LiveController interface {
 	Start(context.Context, string, string) (recording.LiveSession, error)
 	Stop(context.Context, string) error
+	Touch(string)
 }
 
 type TunerCounter interface {
@@ -97,7 +98,7 @@ func New(cfg config.Config, tuner *config.TunerAddress, store Store, refresh gui
 	mux.HandleFunc("DELETE /api/live/{id}", server.stopLive)
 	mux.HandleFunc("POST /api/cast", server.createCastMedia)
 	mux.HandleFunc("GET /cast/{token}/recordings/{asset...}", server.castRecording)
-	mux.Handle("/recordings/", http.StripPrefix("/recordings/", server.recordings))
+	mux.Handle("/recordings/", http.StripPrefix("/recordings/", http.HandlerFunc(server.serveRecording)))
 	if info, err := os.Stat(cfg.WebDir); err == nil && info.IsDir() {
 		mux.Handle("/", spaHandler(cfg.WebDir))
 	}
@@ -358,7 +359,20 @@ func (s *Server) castRecording(w http.ResponseWriter, r *http.Request) {
 	url.RawPath = ""
 	url.RawQuery = ""
 	clone.URL = &url
-	s.recordings.ServeHTTP(w, clone)
+	s.serveRecording(w, clone)
+}
+
+func (s *Server) serveRecording(w http.ResponseWriter, r *http.Request) {
+	s.touchLiveStream(r.URL.Path)
+	s.recordings.ServeHTTP(w, r)
+}
+
+func (s *Server) touchLiveStream(asset string) {
+	parts := strings.Split(strings.TrimPrefix(path.Clean("/"+asset), "/"), "/")
+	if len(parts) < 3 || parts[0] != ".live" || parts[1] == "" {
+		return
+	}
+	s.live.Touch(parts[1])
 }
 
 func castPath(token, playlistPath string) string {

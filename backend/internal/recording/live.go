@@ -32,6 +32,7 @@ type LiveConfig struct {
 	Profile          Profile
 	Pool             *TunerPool
 	ReadyTimeout     time.Duration
+	IdleTimeout      time.Duration
 	MaxDuration      time.Duration
 }
 
@@ -56,6 +57,7 @@ type liveJob struct {
 	cancel     context.CancelFunc
 	done       chan struct{}
 	waitResult chan error
+	activity   chan struct{}
 }
 
 func NewLiveManager(ctx context.Context, config LiveConfig, logger *slog.Logger) *LiveManager {
@@ -67,6 +69,9 @@ func NewLiveManager(ctx context.Context, config LiveConfig, logger *slog.Logger)
 	}
 	if config.ReadyTimeout <= 0 {
 		config.ReadyTimeout = 20 * time.Second
+	}
+	if config.IdleTimeout <= 0 {
+		config.IdleTimeout = 2 * time.Minute
 	}
 	if config.MaxDuration <= 0 {
 		config.MaxDuration = 6 * time.Hour
@@ -105,7 +110,7 @@ func (m *LiveManager) Start(ctx context.Context, channelNumber, title string) (L
 	job := &liveJob{
 		session: LiveSession{ID: id, ChannelNumber: channelNumber, Title: title, PlaylistPath: filepath.ToSlash(filepath.Join(relativeDir, "index.m3u8"))},
 		key:     "live:" + id, dir: outputDir, output: &limitedBuffer{limit: 16 * 1024}, cancel: cancel,
-		done: make(chan struct{}), waitResult: make(chan error, 1),
+		done: make(chan struct{}), waitResult: make(chan error, 1), activity: make(chan struct{}, 1),
 	}
 	if !m.config.Pool.AcquireLive(job.key, cancel, job.done) {
 		cancel()
@@ -152,6 +157,22 @@ func (m *LiveManager) Stop(ctx context.Context, id string) error {
 	}
 }
 
+// Touch records a media read from a live HLS stream. The stream stops after a
+// short period without reads, which releases a tuner even when a browser
+// closes without sending an explicit stop request.
+func (m *LiveManager) Touch(id string) {
+	m.mu.Lock()
+	job := m.jobs[id]
+	m.mu.Unlock()
+	if job == nil {
+		return
+	}
+	select {
+	case job.activity <- struct{}{}:
+	default:
+	}
+}
+
 func (m *LiveManager) Wait() { m.waitGroup.Wait() }
 
 func (m *LiveManager) run(ctx context.Context, job *liveJob) {
@@ -170,17 +191,36 @@ func (m *LiveManager) run(ctx context.Context, job *liveJob) {
 	defer close(job.done)
 	defer m.config.Pool.Release(job.key)
 	go func() { job.waitResult <- job.process.Wait() }()
-	timer := time.NewTimer(m.config.MaxDuration)
-	defer timer.Stop()
-	select {
-	case waitErr := <-job.waitResult:
-		if waitErr != nil && ctx.Err() == nil {
-			m.logger.Warn("live TV process exited", "session", job.session.ID, "error", waitErr, "details", strings.TrimSpace(job.output.String()))
+	maxTimer := time.NewTimer(m.config.MaxDuration)
+	defer maxTimer.Stop()
+	idleTimer := time.NewTimer(m.config.IdleTimeout)
+	defer idleTimer.Stop()
+	for {
+		select {
+		case waitErr := <-job.waitResult:
+			if waitErr != nil && ctx.Err() == nil {
+				m.logger.Warn("live TV process exited", "session", job.session.ID, "error", waitErr, "details", strings.TrimSpace(job.output.String()))
+			}
+			return
+		case <-ctx.Done():
+			stopProcess(job.process, job.waitResult)
+			return
+		case <-maxTimer.C:
+			stopProcess(job.process, job.waitResult)
+			return
+		case <-idleTimer.C:
+			m.logger.Info("live TV stopped after media became idle", "session", job.session.ID)
+			stopProcess(job.process, job.waitResult)
+			return
+		case <-job.activity:
+			if !idleTimer.Stop() {
+				select {
+				case <-idleTimer.C:
+				default:
+				}
+			}
+			idleTimer.Reset(m.config.IdleTimeout)
 		}
-	case <-ctx.Done():
-		stopProcess(job.process, job.waitResult)
-	case <-timer.C:
-		stopProcess(job.process, job.waitResult)
 	}
 }
 

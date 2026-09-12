@@ -56,6 +56,9 @@ large implementation notes here.
 - Live TV creates a temporary rewind buffer. It must not become a library
   recording unless the user explicitly records it, and it must be cleaned up
   when playback ends.
+- Live TV is retained by HLS media reads and expires after a short idle period;
+  do not use browser lifecycle events alone to stop it, because native Safari
+  playback can outlive or temporarily hide the page.
 - Google Cast uses Google's Default Media Receiver: keep the controls in the
   web player and issue an in-memory, short-idle, stream-scoped URL for the TV.
   Never make recordings public or rely on the browser's session cookie for a
@@ -76,6 +79,11 @@ large implementation notes here.
   and stage only the requested files.
 - Do not claim that browser, tuner, GPU, recording, or chase-play behavior was
   validated unless it was actually exercised in the relevant environment.
+- Every code change must add or update focused automated unit or function
+  tests, including a regression test for each bug fix. GitHub Actions has a
+  required `test` merge gate on `main`; rely on that full suite rather than
+  spending turns running it locally, unless the user explicitly asks for local
+  testing or a focused check is needed while debugging.
 
 ## Local development
 

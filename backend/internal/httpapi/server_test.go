@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -75,6 +77,7 @@ func (t testTuners) Usage() (int, int) { return t.used, t.total }
 type testLive struct {
 	startedChannel string
 	stoppedID      string
+	touchedID      string
 }
 
 func (l *testLive) Start(_ context.Context, channel, title string) (recording.LiveSession, error) {
@@ -85,6 +88,7 @@ func (l *testLive) Stop(_ context.Context, id string) error {
 	l.stoppedID = id
 	return nil
 }
+func (l *testLive) Touch(id string) { l.touchedID = id }
 
 func testHandler(t *testing.T, live LiveController, tuners TunerCounter) http.Handler {
 	t.Helper()
@@ -150,6 +154,63 @@ func TestLiveSessionLifecycleRoutes(t *testing.T) {
 	handler.ServeHTTP(response, stopRequest)
 	if response.Code != http.StatusNoContent || live.stoppedID != "live-1" {
 		t.Fatalf("unexpected live stop: status=%d id=%q", response.Code, live.stoppedID)
+	}
+}
+
+func TestLiveMediaReadsTouchSession(t *testing.T) {
+	root := t.TempDir()
+	playlist := filepath.Join(root, ".live", "live-1", "index.m3u8")
+	if err := os.MkdirAll(filepath.Dir(playlist), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(playlist, []byte("#EXTM3U\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	live := &testLive{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	handler := New(config.Config{RecordingsDir: root, TunerCount: 2}, config.NewTunerAddress(""), &testStore{}, guide.RefreshService{}, testRecorder{}, live, testTuners{total: 2}, logger)
+	cookie := setupCookie(t, handler)
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/recordings/.live/live-1/index.m3u8", nil)
+	request.AddCookie(cookie)
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || live.touchedID != "live-1" {
+		t.Fatalf("expected live playlist read to retain session: status=%d touched=%q", response.Code, live.touchedID)
+	}
+}
+
+func TestCastLiveMediaReadTouchesSession(t *testing.T) {
+	root := t.TempDir()
+	playlist := filepath.Join(root, ".live", "live-1", "index.m3u8")
+	if err := os.MkdirAll(filepath.Dir(playlist), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(playlist, []byte("#EXTM3U\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	live := &testLive{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	handler := New(config.Config{RecordingsDir: root, TunerCount: 2}, config.NewTunerAddress(""), &testStore{}, guide.RefreshService{}, testRecorder{}, live, testTuners{total: 2}, logger)
+	cookie := setupCookie(t, handler)
+
+	createResponse := httptest.NewRecorder()
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/cast", bytes.NewBufferString(`{"playlistPath":".live/live-1/index.m3u8","liveSessionId":"live-1"}`))
+	createRequest.Header.Set("Content-Type", "application/json")
+	createRequest.AddCookie(cookie)
+	handler.ServeHTTP(createResponse, createRequest)
+	var media struct {
+		Path string `json:"path"`
+	}
+	if createResponse.Code != http.StatusCreated || json.NewDecoder(createResponse.Body).Decode(&media) != nil || media.Path == "" {
+		t.Fatalf("could not create Cast media: status=%d body=%s", createResponse.Code, createResponse.Body.String())
+	}
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, media.Path, nil))
+	if response.Code != http.StatusOK || live.touchedID != "live-1" {
+		t.Fatalf("expected Cast live playlist read to retain session: status=%d touched=%q", response.Code, live.touchedID)
 	}
 }
 

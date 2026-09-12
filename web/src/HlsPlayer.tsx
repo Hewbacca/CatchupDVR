@@ -299,7 +299,18 @@ export function HlsPlayer({ src, playlistPath, title, startAt = 0, liveSessionId
   return (
     <div className="player-overlay" role="dialog" aria-modal="true" aria-label={`Playing ${title}`}>
       <div className="player-shell">
-        <div className="player-heading"><div><span className="eyebrow">Now playing</span><h2>{title}</h2></div><button type="button" className="icon-button" onClick={closePlayer} aria-label="Close player">×</button></div>
+        <div className="player-heading">
+          <div><span className="eyebrow">Now playing</span><h2>{title}</h2></div>
+          <div className="player-heading-actions">
+            {!casting && (
+              <button type="button" className="cast-button" disabled={castBusy} onClick={() => void startCasting()}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M1 18v3h3a3 3 0 0 0-3-3Zm0-4v2a5 5 0 0 1 5 5h2a7 7 0 0 0-7-7Zm0-4v2c5 0 9 4 9 9h2c0-6.1-4.9-11-11-11Zm3-7a3 3 0 0 0-3 3v2h2V6c0-.6.4-1 1-1h16c.6 0 1 .4 1 1v12c0 .6-.4 1-1 1h-6v2h6a3 3 0 0 0 3-3V6a3 3 0 0 0-3-3H4Z" /></svg>
+                {castBusy ? 'Connecting…' : 'Cast to TV'}
+              </button>
+            )}
+            <button type="button" className="icon-button" onClick={closePlayer} aria-label="Close player">×</button>
+          </div>
+        </div>
         <video ref={videoRef} className={casting ? 'cast-source' : ''} controls={!casting} playsInline preload="auto" onTimeUpdate={(event) => updateTimeline(event.currentTarget)} onSeeking={(event) => updateTimeline(event.currentTarget)} />
         {casting && <div className="cast-status"><span aria-hidden="true">▣</span><div><strong>Casting to your TV</strong><p>Playback controls stay here in CatchUp.</p></div><button type="button" className="subtle" disabled={castBusy} onClick={() => void stopCasting()}>{castBusy ? 'Stopping…' : 'Stop casting'}</button></div>}
         <div className="playback-position" aria-live="off">{range ? `${formatOffset(position)} of ${formatOffset(recordedDuration)} recorded` : 'Preparing recorded timeline…'}</div>
@@ -312,7 +323,6 @@ export function HlsPlayer({ src, playlistPath, title, startAt = 0, liveSessionId
           <button type="button" disabled={!range} onClick={() => jump(30)}>+30</button>
           <button type="button" disabled={!range} onClick={() => jump(60)}>+60</button>
           <button type="button" disabled={!range} className={atLive ? 'live active' : 'live'} onClick={goLive}><span />Go Live</button>
-          {!casting && <button type="button" className="cast-button" disabled={castBusy} onClick={() => void startCasting()}>{castBusy ? 'Connecting…' : 'Cast to TV'}</button>}
         </div>
       </div>
     </div>

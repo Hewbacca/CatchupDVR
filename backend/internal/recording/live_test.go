@@ -90,6 +90,63 @@ func TestLiveStopReleasesTunerBeforeBufferCleanup(t *testing.T) {
 	}
 }
 
+func TestLiveSessionStopsAfterMediaBecomesIdle(t *testing.T) {
+	root := t.TempDir()
+	pool := NewTunerPool(1)
+	manager := NewLiveManager(context.Background(), LiveConfig{
+		HDHomeRunAddress: func() string { return "192.168.0.103" }, RecordingsDir: root, Pool: pool,
+		Profile: Profile{Mode: "software"}, ReadyTimeout: time.Second, IdleTimeout: 50 * time.Millisecond,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	manager.newProcess = func(command Command, _ io.Writer) process {
+		return &fakeProcess{playlistPath: command.Args[len(command.Args)-1], stopped: make(chan struct{})}
+	}
+	if _, err := manager.Start(context.Background(), "7.1", "Live News"); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+	go func() { manager.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("idle live session did not stop")
+	}
+	if used, total := pool.Usage(); used != 0 || total != 1 {
+		t.Fatalf("idle session retained tuner: %d of %d", used, total)
+	}
+}
+
+func TestLiveSessionMediaActivityRenewsIdleTimeout(t *testing.T) {
+	root := t.TempDir()
+	pool := NewTunerPool(1)
+	manager := NewLiveManager(context.Background(), LiveConfig{
+		HDHomeRunAddress: func() string { return "192.168.0.103" }, RecordingsDir: root, Pool: pool,
+		Profile: Profile{Mode: "software"}, ReadyTimeout: time.Second, IdleTimeout: 150 * time.Millisecond,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	manager.newProcess = func(command Command, _ io.Writer) process {
+		return &fakeProcess{playlistPath: command.Args[len(command.Args)-1], stopped: make(chan struct{})}
+	}
+	session, err := manager.Start(context.Background(), "7.1", "Live News")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(75 * time.Millisecond)
+	manager.Touch(session.ID)
+	time.Sleep(100 * time.Millisecond)
+	if used, total := pool.Usage(); used != 1 || total != 1 {
+		t.Fatalf("media activity did not renew the live session: %d of %d", used, total)
+	}
+
+	done := make(chan struct{})
+	go func() { manager.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("live session did not stop after renewed idle timeout")
+	}
+}
+
 func TestRecordingFolderUsesTitleAndLocalAiringTime(t *testing.T) {
 	recording := model.Recording{
 		Title: "The Matrix!", ProgramStart: time.Date(2026, 9, 10, 18, 0, 0, 0, time.Local),
