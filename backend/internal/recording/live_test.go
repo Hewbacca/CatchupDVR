@@ -47,6 +47,18 @@ func TestLiveSessionCreatesAndRemovesTemporaryBuffer(t *testing.T) {
 	}
 }
 
+func TestLivePlaylistRequiresThreeSegmentStartupBuffer(t *testing.T) {
+	oneSegment := []byte("#EXTM3U\n#EXTINF:4.0,\nsegment-000000000.ts\n")
+	if livePlaylistReady(oneSegment) {
+		t.Fatal("one segment must not be exposed as a ready iPad live stream")
+	}
+	threeSegments := append(oneSegment,
+		[]byte("#EXTINF:4.0,\nsegment-000000001.ts\n#EXTINF:4.0,\nsegment-000000002.ts\n")...)
+	if !livePlaylistReady(threeSegments) {
+		t.Fatal("three complete segments should make the live stream ready")
+	}
+}
+
 func TestLiveStopReleasesTunerBeforeBufferCleanup(t *testing.T) {
 	root := t.TempDir()
 	pool := NewTunerPool(1)

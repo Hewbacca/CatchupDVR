@@ -174,7 +174,7 @@ func (p *fakeProcess) Start() error {
 	if err := os.MkdirAll(filepath.Dir(p.playlistPath), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(p.playlistPath, []byte("#EXTM3U\n#EXTINF:4.0,\nsegment-000000000.ts\n"), 0o644)
+	return os.WriteFile(p.playlistPath, []byte("#EXTM3U\n#EXTINF:4.0,\nsegment-000000000.ts\n#EXTINF:4.0,\nsegment-000000001.ts\n#EXTINF:4.0,\nsegment-000000002.ts\n"), 0o644)
 }
 
 func (p *fakeProcess) Wait() error            { <-p.stopped; return nil }
