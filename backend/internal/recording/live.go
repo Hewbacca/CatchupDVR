@@ -19,6 +19,8 @@ import (
 
 var ErrNoTuners = errors.New("all tuners are currently in use")
 
+const liveStartupSegments = 3
+
 type LiveSession struct {
 	ID            string `json:"id"`
 	ChannelNumber string `json:"channelNumber"`
@@ -232,7 +234,7 @@ func (m *LiveManager) waitUntilReady(ctx context.Context, job *liveJob) error {
 	playlist := filepath.Join(job.dir, "index.m3u8")
 	for {
 		data, err := os.ReadFile(playlist)
-		if err == nil && bytes.Contains(data, []byte("#EXTINF:")) {
+		if err == nil && livePlaylistReady(data) {
 			return nil
 		}
 		select {
@@ -249,6 +251,10 @@ func (m *LiveManager) waitUntilReady(ctx context.Context, job *liveJob) error {
 		case <-ticker.C:
 		}
 	}
+}
+
+func livePlaylistReady(data []byte) bool {
+	return bytes.Count(data, []byte("#EXTINF:")) >= liveStartupSegments
 }
 
 func stopProcess(proc process, waitResult <-chan error) {

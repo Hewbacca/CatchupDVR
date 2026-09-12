@@ -56,9 +56,10 @@ large implementation notes here.
 - Live TV creates a temporary rewind buffer. It must not become a library
   recording unless the user explicitly records it, and it must be cleaned up
   when playback ends.
-- Live TV is retained by HLS media reads and expires after a short idle period;
-  do not use browser lifecycle events alone to stop it, because native Safari
-  playback can outlive or temporarily hide the page.
+- Live TV is retained by HLS media reads and expires after a short idle period.
+  Wait for at least three complete HLS segments before exposing a new live
+  session, and do not use browser lifecycle events alone to stop it, because
+  native Safari playback can outlive or temporarily hide the page.
 - Google Cast uses Google's Default Media Receiver: keep the controls in the
   web player and issue an in-memory, short-idle, stream-scoped URL for the TV.
   Never make recordings public or rely on the browser's session cookie for a
