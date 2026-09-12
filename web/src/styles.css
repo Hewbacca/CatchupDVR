@@ -162,10 +162,15 @@ h1 { font-size: clamp(1.8rem, 4vw, 2.8rem); line-height: 1; margin: 0; }
 .settings-section .primary { justify-self: start; margin-top: 4px; }
 .settings-error { margin: 0; color: #ff9ba1; font-size: .9rem; line-height: 1.4; }
 
-.player-overlay { position: fixed; z-index: 60; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(0,5,12,.9); }
-.player-shell { width: min(1100px, 100%); }
+.player-overlay { position: fixed; z-index: 60; inset: 0; display: grid; place-items: center; overflow-y: auto; padding: 20px; background: rgba(0,5,12,.9); }
+.player-shell { width: min(1100px, 100%); margin: auto; }
 .player-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.player-heading > div:first-child { min-width: 0; }
 .player-heading h2 { margin: 0; font-size: 1.5rem; }
+.player-heading-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; margin-left: 16px; }
+.player-heading-actions .cast-button { display: inline-flex; align-items: center; gap: 8px; min-height: 42px; padding: 9px 13px; border: 1px solid #2f9bb0; border-radius: 9px; background: #103747; color: var(--ink); font-weight: 700; cursor: pointer; }
+.player-heading-actions .cast-button svg { width: 20px; height: 20px; fill: currentColor; }
+.player-heading-actions .cast-button:disabled { opacity: .42; cursor: wait; }
 .player-shell video { display: block; width: 100%; max-height: 70vh; background: #000; border-radius: 12px; box-shadow: 0 20px 80px #000; }
 .player-shell video.cast-source { height: 0; min-height: 0; opacity: 0; pointer-events: none; }
 .cast-status { display: flex; align-items: center; gap: 12px; margin-top: 12px; padding: 14px 16px; border: 1px solid #385069; border-radius: 12px; background: #0d2034; }
@@ -180,7 +185,6 @@ h1 { font-size: clamp(1.8rem, 4vw, 2.8rem); line-height: 1; margin: 0; }
 .transport .live { display: flex; align-items: center; gap: 7px; }
 .transport .live span { width: 7px; height: 7px; border-radius: 50%; background: var(--record); }
 .transport .live.active { color: #fff; border-color: var(--record); }
-.transport .cast-button { border-color: #2f9bb0; background: #103747; }
 .transport button:disabled { opacity: .42; cursor: wait; }
 .toast { position: fixed; z-index: 80; left: 50%; bottom: max(24px, env(safe-area-inset-bottom)); transform: translateX(-50%); max-width: min(420px, calc(100% - 28px)); border-radius: 10px; padding: 12px 18px; color: #07111f; font-weight: 700; box-shadow: 0 12px 38px rgba(0,0,0,.4); }
 .toast.success { background: var(--accent); }
