@@ -123,10 +123,16 @@ export function HlsPlayer({ src, playlistPath, title, startAt = 0, liveSessionId
     const nativeHls = Boolean(video.canPlayType('application/vnd.apple.mpegurl'))
     const hlsJsSupported = Hls.isSupported()
     if (nativeHls && (isSafari() || !hlsJsSupported)) {
+      // Safari's native HLS player chooses an appropriate initial position for
+      // an open-ended live playlist. Seeking to exactly zero while it is still
+      // attaching its first media segment can make iPadOS abort playback after
+      // the preview frame. A saved recording resume position still needs to be
+      // applied explicitly.
+      const hasInitialPosition = startAt > 0.01
       let startedAtBeginning = false
       const handleNativeStart = () => {
         updateTimeline(video)
-        if (!startedAtBeginning && timelineRef.current) {
+        if (hasInitialPosition && !startedAtBeginning && timelineRef.current) {
           startedAtBeginning = true
           seekTo(timelineRef.current.start + Math.max(0.01, startAt))
         }

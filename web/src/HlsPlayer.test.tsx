@@ -25,4 +25,19 @@ describe('HlsPlayer', () => {
     expect(castButton.closest('.player-heading-actions')).toBeInTheDocument()
     expect(screen.getByLabelText('Playback jumps')).not.toContainElement(castButton)
   })
+
+  it('does not force native HLS live playback to seek to zero during startup', () => {
+    const canPlayType = vi.spyOn(HTMLVideoElement.prototype, 'canPlayType').mockReturnValue('probably')
+    const setCurrentTime = vi.fn()
+
+    const { container, unmount } = render(<HlsPlayer src="/recordings/.live/test/index.m3u8" playlistPath=".live/test/index.m3u8" title="Live test" onClose={vi.fn()} />)
+    const video = container.querySelector('video')!
+    Object.defineProperty(video, 'seekable', { configurable: true, value: { length: 1, start: () => 0, end: () => 4 } })
+    Object.defineProperty(video, 'currentTime', { configurable: true, get: () => 0, set: setCurrentTime })
+    video.dispatchEvent(new Event('loadedmetadata'))
+
+    expect(setCurrentTime).not.toHaveBeenCalled()
+    unmount()
+    canPlayType.mockRestore()
+  })
 })
